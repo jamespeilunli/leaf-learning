@@ -5,34 +5,18 @@ import type { NodeProps } from 'reactflow'
 import { useSessionStore } from '../store/useSessionStore'
 import type { GraphNode } from '../types'
 
-function badgeForScore(score: number | null): { label: string; className: string } {
-  if (score === null || score <= 0.35) {
-    return { label: 'conceptual', className: 'bg-sky-100 text-sky-800' }
-  }
-  if (score <= 0.65) {
-    return { label: 'mixed', className: 'bg-slate-200 text-slate-700' }
-  }
-  return { label: 'technical', className: 'bg-amber-100 text-amber-800' }
-}
-
 export function Phase2Node({ data }: NodeProps<{ node: GraphNode }>) {
   const { node } = data
   const streamingNodeIds = useSessionStore((state) => state.streamingNodeIds)
   const openChat = useSessionStore((state) => state.openChat)
   const markLearned = useSessionStore((state) => state.markLearned)
   const deleteNode = useSessionStore((state) => state.deleteNode)
-  const badge = badgeForScore(node.intuition_score)
   const isStreaming = streamingNodeIds.has(node.id)
 
   return (
     <div className="min-w-[260px] max-w-[300px] rounded-[22px] border border-[var(--line)] bg-white p-4 shadow-[0_20px_40px_rgba(15,23,42,0.12)]">
       <Handle position={Position.Top} style={{ opacity: 0 }} type="target" />
-      <div className="flex items-start justify-between gap-3">
-        <div className="text-[15px] font-semibold leading-6 text-[var(--ink)]">{node.label}</div>
-        <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase ${badge.className}`}>
-          {badge.label}
-        </span>
-      </div>
+      <div className="text-[15px] font-semibold leading-6 text-[var(--ink)]">{node.label}</div>
 
       {node.description ? (
         <p className="mt-3 text-[13px] leading-6 text-[var(--muted)]">{node.description}</p>
