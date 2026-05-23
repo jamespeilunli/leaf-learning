@@ -9,10 +9,8 @@ This repo is split into:
 
 ```bash
 cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-OPENAI_API_KEY=sk-your-key-here uvicorn app.main:app --reload --port 8000
+uv sync
+OPENAI_API_KEY=sk-your-key-here uv run uvicorn app.main:app --reload --port 8000
 ```
 
 ## Frontend
