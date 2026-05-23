@@ -1,8 +1,8 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type ELKConstructor from 'elkjs/lib/elk.bundled.js'
 
-import dagre from 'dagre'
 import { ArrowLeft } from 'lucide-react'
-import ReactFlow, { Background, Controls, MiniMap } from 'reactflow'
+import ReactFlow, { Background, Controls, MarkerType, MiniMap } from 'reactflow'
 import type { Edge as RFEdge, Node as RFNode } from 'reactflow'
 
 import { useSessionStore } from '../store/useSessionStore'
@@ -11,26 +11,58 @@ import { GrayedNode } from './GrayedNode'
 import { Phase2Node } from './Phase2Node'
 
 const nodeTypes = { phase2Node: Phase2Node, grayedNode: GrayedNode }
+const ACTIVE_NODE = { width: 320, height: 188 }
+const GRAYED_NODE = { width: 236, height: 132 }
+type ElkInstance = InstanceType<typeof ELKConstructor>
 
-function getLayoutedElements(
-  nodes: RFNode[],
-  edges: RFEdge[],
-  nodeWidth = 280,
-  nodeHeight = 170,
-) {
-  const graph = new dagre.graphlib.Graph()
-  graph.setDefaultEdgeLabel(() => ({}))
-  graph.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 100 })
+let elkPromise: Promise<ElkInstance> | null = null
 
-  nodes.forEach((node) => graph.setNode(node.id, { width: nodeWidth, height: nodeHeight }))
-  edges.forEach((edge) => graph.setEdge(edge.source, edge.target))
-  dagre.layout(graph)
+async function getElk(): Promise<ElkInstance> {
+  elkPromise ??= import('elkjs/lib/elk.bundled.js').then(({ default: ELK }) => new ELK())
+  return elkPromise
+}
 
-  return nodes.map((node) => {
-    const { x, y } = graph.node(node.id)
+function sizeForNode(node: AppGraphNode) {
+  return node.node_state === 'grayed' ? GRAYED_NODE : ACTIVE_NODE
+}
+
+async function layoutTree(nodes: AppGraphNode[], edges: RFEdge[]): Promise<RFNode[]> {
+  const elk = await getElk()
+  const children = nodes.map((node) => {
+    const size = sizeForNode(node)
     return {
-      ...node,
-      position: { x: x - nodeWidth / 2, y: y - nodeHeight / 2 },
+      id: node.id,
+      width: size.width,
+      height: size.height,
+    }
+  })
+
+  const graph = await elk.layout({
+    id: 'phase-2-roadmap',
+    layoutOptions: {
+      'elk.algorithm': 'layered',
+      'elk.direction': 'DOWN',
+      'elk.spacing.nodeNode': '52',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '110',
+      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+      'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+    },
+    children,
+    edges: edges.map((edge) => ({
+      id: edge.id,
+      sources: [edge.source],
+      targets: [edge.target],
+    })),
+  })
+
+  const positions = new Map((graph.children ?? []).map((node) => [node.id, node]))
+  return nodes.map((node) => {
+    const position = positions.get(node.id)
+    return {
+      id: node.id,
+      type: node.node_state === 'grayed' ? 'grayedNode' : 'phase2Node',
+      position: { x: position?.x ?? 0, y: position?.y ?? 0 },
+      data: { node },
     }
   })
 }
@@ -38,6 +70,7 @@ function getLayoutedElements(
 export function GraphCanvas() {
   const session = useSessionStore((state) => state.session)
   const restartFlow = useSessionStore((state) => state.restartFlow)
+  const [rfNodes, setRfNodes] = useState<RFNode[]>([])
 
   const graphNodes = useMemo(() => {
     if (!session) return []
@@ -50,33 +83,40 @@ export function GraphCanvas() {
     if (!session) return []
     return session.edges.map((edge) => ({
       id: edge.id,
-      source: edge.from,
-      target: edge.to,
-      label: edge.label ?? undefined,
-      style: { strokeWidth: 1, stroke: '#94a3b8' },
-      labelStyle: { fill: '#64748b', fontSize: 11, fontWeight: 600 },
+      source: edge.to,
+      target: edge.from,
+      label: 'supports',
+      type: 'smoothstep',
+      markerEnd: { type: MarkerType.ArrowClosed, color: '#334155', width: 18, height: 18 },
+      style: { strokeWidth: 1.6, stroke: '#334155' },
+      labelBgPadding: [8, 4],
+      labelBgBorderRadius: 999,
+      labelBgStyle: { fill: '#f8fafc', fillOpacity: 0.92 },
+      labelStyle: { fill: '#475569', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' },
     }))
   }, [session])
 
-  const rfNodes = useMemo<RFNode[]>(() => {
-    const nodes = graphNodes.map((node: AppGraphNode) => ({
-      id: node.id,
-      type: node.node_state === 'grayed' ? 'grayedNode' : 'phase2Node',
-      position: { x: 0, y: 0 },
-      data: { node },
-    }))
-    return getLayoutedElements(nodes, rfEdges)
+  useEffect(() => {
+    let cancelled = false
+    void layoutTree(graphNodes, rfEdges).then((layouted) => {
+      if (!cancelled) setRfNodes(layouted)
+    })
+    return () => {
+      cancelled = true
+    }
   }, [graphNodes, rfEdges])
 
   if (!session) return null
   const focusNode = session.focus_node_id ? session.nodes[session.focus_node_id] : null
 
   return (
-    <div className="h-screen w-full bg-[radial-gradient(circle_at_top,rgba(14,165,233,0.12),transparent_35%),linear-gradient(180deg,#f6f6f2_0%,#eef2f7_100%)]">
+    <div className="h-screen w-full bg-[#eef1ec]">
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(24,33,45,0.045)_1px,transparent_1px),linear-gradient(180deg,rgba(24,33,45,0.045)_1px,transparent_1px)] bg-[size:34px_34px]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_100%,rgba(191,91,44,0.18),transparent_34%),radial-gradient(circle_at_15%_10%,rgba(14,165,233,0.14),transparent_28%)]" />
       <div className="pointer-events-none absolute inset-x-0 top-4 z-10 flex items-start justify-between gap-4 px-4">
         <button
           aria-label="Back to start"
-          className="pointer-events-auto inline-flex h-11 items-center gap-2 rounded-full border border-white/70 bg-white/92 px-4 text-sm font-semibold text-[var(--ink)] shadow-[0_14px_34px_rgba(15,23,42,0.14)] backdrop-blur transition hover:border-[var(--accent)] hover:text-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2"
+          className="pointer-events-auto inline-flex h-11 items-center gap-2 rounded-full border border-white/70 bg-white/90 px-4 text-sm font-semibold text-[var(--ink)] shadow-[0_14px_34px_rgba(15,23,42,0.14)] backdrop-blur transition hover:border-[var(--accent)] hover:text-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2"
           title="Back to start"
           type="button"
           onClick={restartFlow}
@@ -84,22 +124,32 @@ export function GraphCanvas() {
           <ArrowLeft className="h-4 w-4" />
           Back
         </button>
-        <div className="pointer-events-auto max-w-[min(520px,calc(100vw-7rem))] rounded-full border border-white/70 bg-white/82 px-4 py-2 text-right shadow-[0_14px_34px_rgba(15,23,42,0.10)] backdrop-blur">
+        <div className="pointer-events-auto max-w-[min(520px,calc(100vw-7rem))] rounded-full border border-white/70 bg-white/80 px-4 py-2 text-right shadow-[0_14px_34px_rgba(15,23,42,0.10)] backdrop-blur">
           <div className="truncate text-sm font-semibold text-[var(--ink)]">
             {focusNode?.label ?? session.root_topic}
           </div>
         </div>
       </div>
       <ReactFlow
-        defaultEdgeOptions={{ type: 'smoothstep' }}
         fitView
+        fitViewOptions={{ padding: 0.22 }}
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
+        proOptions={{ hideAttribution: true }}
       >
-        <MiniMap pannable zoomable />
+        <MiniMap
+          pannable
+          zoomable
+          nodeColor={(node) => {
+            const roadmapNode = node.data?.node as AppGraphNode | undefined
+            if (roadmapNode?.node_state === 'learned') return '#10b981'
+            if (roadmapNode?.node_state === 'grayed') return '#94a3b8'
+            return '#bf5b2c'
+          }}
+        />
         <Controls />
-        <Background color="#dbe3ef" gap={18} size={1} />
+        <Background color="#cbd5dc" gap={34} size={1} />
       </ReactFlow>
     </div>
   )

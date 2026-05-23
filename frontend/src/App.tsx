@@ -3,15 +3,14 @@ import { useEffect } from 'react'
 import axios from 'axios'
 
 import { GraphCanvas } from './components/GraphCanvas'
-import { NodeChatPanel } from './components/NodeChatPanel'
 import { Phase1View } from './components/Phase1View'
+import { Phase2Sidebar } from './components/Phase2Sidebar'
 import { StartScreen } from './components/StartScreen'
 import { SESSION_STORAGE_KEY, useSessionStore } from './store/useSessionStore'
 
 function App() {
   const session = useSessionStore((state) => state.session)
   const isLoading = useSessionStore((state) => state.isLoading)
-  const chatOpenNodeId = useSessionStore((state) => state.chatOpenNodeId)
   const loadSession = useSessionStore((state) => state.loadSession)
 
   useEffect(() => {
@@ -36,7 +35,7 @@ function App() {
   return (
     <main className="relative h-screen w-full overflow-hidden">
       <GraphCanvas />
-      {chatOpenNodeId ? <NodeChatPanel key={chatOpenNodeId} /> : null}
+      <Phase2Sidebar />
     </main>
   )
 }
