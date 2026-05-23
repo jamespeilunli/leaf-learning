@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.ai import expand_phase2_node, explain_prerequisite
+from app.ai import expand_phase2_node, explain_prerequisite, suggest_prerequisite
 from app.models import GraphEdge, GraphNode, Resource, Session
 from app.storage import load_session, save_session
 
@@ -17,6 +17,10 @@ router = APIRouter()
 
 class UpdateNodeStateRequest(BaseModel):
     node_state: str
+
+
+class SuggestPrerequisiteRequest(BaseModel):
+    message: str
 
 
 def _sse(event: str, data: object) -> str:
@@ -71,8 +75,12 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
             data = event["data"]
 
             if event_name == "node_updated":
+                if data.get("sources"):
+                    node.sources = [Resource.model_validate(item) for item in data["sources"]]
                 if data.get("resource"):
                     node.resource = Resource.model_validate(data["resource"])
+                    if not node.sources:
+                        node.sources = [node.resource]
                 save_session(session)
                 payload = {"id": node.id, **data}
                 yield _sse("node_updated", payload)
@@ -105,6 +113,41 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
                 return
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/session/{session_id}/node/{node_id}/suggest-prerequisite")
+async def suggest_node_prerequisite(
+    session_id: str,
+    node_id: str,
+    payload: SuggestPrerequisiteRequest,
+) -> dict:
+    session = load_session(session_id)
+    parent = _get_node(session, node_id)
+    if parent.node_state not in {"expanded", "learned"}:
+        raise HTTPException(status_code=400, detail="Missing prerequisites can only be added to active nodes.")
+
+    suggestion = await suggest_prerequisite(
+        payload.message,
+        parent.label,
+        parent.description or "",
+    )
+    child = GraphNode(
+        label=suggestion["label"],
+        description=suggestion["description"],
+        phase="2",
+        node_state="grayed",
+        parent_id=parent.id,
+        depth=parent.depth + 1,
+    )
+    edge = GraphEdge(from_id=parent.id, to_id=child.id, label="requires")
+    session.nodes[child.id] = child
+    parent.child_ids.append(child.id)
+    session.edges.append(edge)
+    save_session(session)
+    return {
+        "node": child.model_dump(by_alias=True),
+        "edge": edge.model_dump(by_alias=True),
+    }
 
 
 @router.post("/session/{session_id}/node/{node_id}/explain")

@@ -49,7 +49,7 @@ async def chat(session_id: str, node_id: str, payload: ChatRequest) -> Streaming
         raise HTTPException(status_code=400, detail="Node chat is only available for expanded nodes.")
     goal_path = _goal_path(session, node)
     node_description = node.description or ""
-    resource_description = node.resource.description if node.resource else ""
+    resource_description = node.sources[0].description if node.sources else node.resource.description if node.resource else ""
 
     async def event_stream() -> Iterable[str]:
         full_response = ""

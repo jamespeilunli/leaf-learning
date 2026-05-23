@@ -133,16 +133,18 @@ async def expand_phase2_node(
 You are a learning roadmap assistant. The user's goal is to understand "{goal_label}".
 Explain topics at a technical level with formal, precise, mechanism-focused detail.
 
-Search for and read the best resource that genuinely explains "{node_label}" at this technical level.
-The resource must explain the topic in depth, not just introduce it.
+Search for and read the best resources that genuinely explain "{node_label}" at this technical level.
+The resources must explain the topic in depth, not just introduce it.
 
 Return ONLY a JSON object with this exact shape:
 {{
-  "resource": {{
-    "url": "string",
-    "title": "string",
-    "description": "string (1–2 sentences on exactly what this resource covers and why it's the right one)"
-  }},
+  "sources": [
+    {{
+      "url": "string",
+      "title": "string",
+      "description": "string (1–2 sentences on exactly what this resource covers and why it's useful)"
+    }}
+  ],
   "prerequisites": [
     {{
       "label": "string",
@@ -151,7 +153,8 @@ Return ONLY a JSON object with this exact shape:
   ]
 }}
 
-prerequisites must be topics directly used or assumed by the resource — not general background.
+sources must contain 2 to 4 high-quality technical resources.
+prerequisites must be topics directly used or assumed by these resources — not general background.
 Do NOT include any of these topics as prerequisites, the user already knows them: {known_topics}
 Return ONLY the JSON object. No prose, no markdown fences.
 """.strip()
@@ -165,11 +168,12 @@ Return ONLY the JSON object. No prose, no markdown fences.
         )
         payload = _loads_json_object(_extract_response_text(response))
 
-        resource = Resource.model_validate(payload["resource"])
+        raw_sources = payload.get("sources") or [payload["resource"]]
+        sources = [Resource.model_validate(item) for item in raw_sources[:4]]
         yield {
             "event": "node_updated",
             "data": {
-                "resource": resource.model_dump(),
+                "sources": [source.model_dump() for source in sources],
             },
         }
 
@@ -215,6 +219,40 @@ Write 3 to 5 sentences. Do not assume they know the term — explain it plainly.
         input=f"Explain the prerequisite {node_label}.",
     )
     return _extract_response_text(response)
+
+
+async def suggest_prerequisite(
+    user_message: str,
+    parent_label: str,
+    parent_description: str,
+) -> dict[str, str]:
+    if using_mock_ai():
+        return await mock_ai.suggest_prerequisite(user_message, parent_label, parent_description)
+
+    instructions = f"""
+You convert a user's note into a clean prerequisite node for a learning roadmap.
+The parent topic is "{parent_label}" ({parent_description}).
+
+Return ONLY a JSON object with this exact shape:
+{{
+  "label": "string (short technical concept name)",
+  "description": "string (1 sentence explaining what it is and why it supports the parent topic)"
+}}
+
+The result should be a prerequisite or supporting concept, not a question.
+No markdown fences. No prose outside JSON.
+""".strip()
+
+    response = await get_client().responses.create(
+        model=MODEL,
+        instructions=instructions,
+        input=user_message,
+    )
+    payload = _loads_json_object(_extract_response_text(response))
+    return {
+        "label": str(payload["label"]).strip(),
+        "description": str(payload["description"]).strip(),
+    }
 
 
 async def chat_with_node(
