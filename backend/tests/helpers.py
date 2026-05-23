@@ -14,10 +14,6 @@ from app.main import app
 
 
 def configure_test_ai_mode() -> None:
-    allow_real_ai = os.getenv("ALPHAG3N_TEST_ALLOW_REAL_AI", "").strip() == "1"
-    requested_mode = os.getenv("ALPHAG3N_AI_MODE", "").strip().lower()
-    if allow_real_ai and requested_mode == "openai":
-        return
     os.environ["ALPHAG3N_AI_MODE"] = "mock"
 
 

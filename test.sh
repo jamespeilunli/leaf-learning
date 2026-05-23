@@ -68,7 +68,9 @@ echo "Running backend tests..."
 (
   cd "$ROOT_DIR/backend"
   if [[ "$AI_MODE" == "openai" ]]; then
-    ALPHAG3N_AI_MODE=openai ALPHAG3N_TEST_ALLOW_REAL_AI=1 uv run python -m unittest discover -s tests
+    ALPHAG3N_AI_MODE=mock uv run python -m unittest discover -s tests
+    echo "Running OpenAI integration tests..."
+    ALPHAG3N_AI_MODE=openai ALPHAG3N_TEST_ALLOW_REAL_AI=1 uv run python -m unittest tests.openai_integration
   else
     ALPHAG3N_AI_MODE=mock uv run python -m unittest discover -s tests
   fi
