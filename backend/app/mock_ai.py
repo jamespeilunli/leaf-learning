@@ -274,7 +274,7 @@ async def expand_phase2_node(
             continue
         node = GraphNode(label=label, description=hint, phase="2", node_state="grayed")
         yield {"event": "node_added", "data": node.model_dump(by_alias=True)}
-        edge = GraphEdge(from_id=node_label, to_id=node.id, label="requires")
+        edge = GraphEdge(from_id=node_label, to_id=node.id, label=None)
         yield {"event": "edge_added", "data": edge.model_dump(by_alias=True)}
 
     yield {"event": "stream_done", "data": {}}

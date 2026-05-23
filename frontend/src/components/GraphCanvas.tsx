@@ -1,22 +1,28 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import dagre from 'dagre'
 import { ArrowLeft } from 'lucide-react'
 import ReactFlow, { Background, Controls, MiniMap } from 'reactflow'
 import type { Edge as RFEdge, Node as RFNode } from 'reactflow'
-import { Position } from 'reactflow'
+import { MarkerType, Position } from 'reactflow'
 
 import { useSessionStore } from '../store/useSessionStore'
 import type { GraphNode as AppGraphNode } from '../types'
+import { CenterLineEdge } from './CenterLineEdge'
 import { GrayedNode } from './GrayedNode'
 import { Phase2FocusOverlay } from './Phase2FocusOverlay'
 import { Phase2Node } from './Phase2Node'
 
 const nodeTypes = { phase2Node: Phase2Node, grayedNode: GrayedNode }
+const edgeTypes = { centerLine: CenterLineEdge }
 
 export interface GraphCanvasNodeData {
   node: AppGraphNode
   reportSize: (nodeId: string, width: number, height: number) => void
+}
+
+interface CenterLineEdgeData {
+  sourceCenter: { x: number; y: number }
+  targetCenter: { x: number; y: number }
 }
 
 type LayoutNode = RFNode<GraphCanvasNodeData> & {
@@ -33,22 +39,126 @@ function getNodeDimensions(node: AppGraphNode): { width: number; height: number 
 }
 
 function getLayoutedElements(nodes: LayoutNode[], edges: RFEdge[]) {
-  const graph = new dagre.graphlib.Graph()
-  graph.setDefaultEdgeLabel(() => ({}))
-  graph.setGraph({ rankdir: 'LR', align: 'UL', nodesep: 92, ranksep: 150, marginx: 56, marginy: 56 })
+  const siblingGapBase = 36
+  const siblingGapStep = 6
+  const rootGap = 112
+  const verticalGap = 104
+  const horizontalMargin = 56
+  const verticalMargin = 56
+  const nodeMap = new Map(nodes.map((node) => [node.id, { ...node, style: { width: node.width, height: node.height } }]))
+  const outgoing = new Map<string, string[]>()
+  const incoming = new Set<string>()
 
-  nodes.forEach((node) => graph.setNode(node.id, { width: node.width, height: node.height }))
-  edges.forEach((edge) => graph.setEdge(edge.source, edge.target))
-  dagre.layout(graph)
+  edges.forEach((edge) => {
+    incoming.add(edge.target)
+    const children = outgoing.get(edge.source) ?? []
+    children.push(edge.target)
+    outgoing.set(edge.source, children)
+  })
 
-  return nodes.map((node) => {
-    const { x, y } = graph.node(node.id)
-    return {
-      ...node,
-      position: { x: x - node.width / 2, y: y - node.height / 2 },
-      style: { width: node.width },
+  nodeMap.forEach((node) => {
+    const orderedChildren = node.data.node.child_ids.filter((childId) => nodeMap.has(childId))
+    if (orderedChildren.length > 0) {
+      outgoing.set(node.id, orderedChildren)
+    } else if (!outgoing.has(node.id)) {
+      outgoing.set(node.id, [])
     }
   })
+
+  const roots = [...nodeMap.values()]
+    .filter((node) => !incoming.has(node.id))
+    .sort((a, b) => a.data.node.depth - b.data.node.depth || a.data.node.label.localeCompare(b.data.node.label))
+
+  const rootDepth = Math.min(...roots.map((node) => node.data.node.depth))
+
+  const siblingGapForDepth = (depth: number) => siblingGapBase + Math.max(0, depth - rootDepth) * siblingGapStep
+
+  const subtreeWidths = new Map<string, number>()
+  const levelHeights = new Map<number, number>()
+
+  const measureSubtree = (nodeId: string): number => {
+    const node = nodeMap.get(nodeId)
+    if (!node) return 0
+
+    levelHeights.set(node.data.node.depth, Math.max(levelHeights.get(node.data.node.depth) ?? 0, node.height))
+    const childIds = outgoing.get(nodeId) ?? []
+    if (childIds.length === 0) {
+      subtreeWidths.set(nodeId, node.width)
+      return node.width
+    }
+
+    const siblingGap = siblingGapForDepth(node.data.node.depth + 1)
+    const childrenWidth =
+      childIds.reduce((total, childId) => total + measureSubtree(childId), 0) +
+      Math.max(0, childIds.length - 1) * siblingGap
+    const width = Math.max(node.width, childrenWidth)
+    subtreeWidths.set(nodeId, width)
+    return width
+  }
+
+  roots.forEach((root) => measureSubtree(root.id))
+
+  const orderedDepths = [...levelHeights.keys()].sort((a, b) => a - b)
+  const levelY = new Map<number, number>()
+  let currentY = verticalMargin
+  orderedDepths.forEach((depth) => {
+    levelY.set(depth, currentY)
+    currentY += (levelHeights.get(depth) ?? 0) + verticalGap
+  })
+
+  const placeSubtree = (nodeId: string, leftX: number) => {
+    const node = nodeMap.get(nodeId)
+    if (!node) return
+
+    const subtreeWidth = subtreeWidths.get(nodeId) ?? node.width
+    const nodeX = leftX + (subtreeWidth - node.width) / 2
+    node.position = {
+      x: nodeX,
+      y: levelY.get(node.data.node.depth) ?? verticalMargin,
+    }
+
+    const childIds = outgoing.get(nodeId) ?? []
+    if (childIds.length === 0) {
+      return
+    }
+
+    const siblingGap = siblingGapForDepth(node.data.node.depth + 1)
+    const childrenWidth =
+      childIds.reduce((total, childId) => total + (subtreeWidths.get(childId) ?? 0), 0) +
+      Math.max(0, childIds.length - 1) * siblingGap
+    let childLeftX = leftX + (subtreeWidth - childrenWidth) / 2
+
+    childIds.forEach((childId) => {
+      placeSubtree(childId, childLeftX)
+      childLeftX += (subtreeWidths.get(childId) ?? 0) + siblingGap
+    })
+  }
+
+  const totalWidth =
+    roots.reduce((total, root) => total + (subtreeWidths.get(root.id) ?? 0), 0) +
+    Math.max(0, roots.length - 1) * rootGap
+  let rootLeftX = horizontalMargin
+
+  roots.forEach((root, index) => {
+    placeSubtree(root.id, rootLeftX)
+    rootLeftX += (subtreeWidths.get(root.id) ?? 0) + (index < roots.length - 1 ? rootGap : 0)
+  })
+
+  const positionedNodes = [...nodeMap.values()]
+  const minX = Math.min(...positionedNodes.map((node) => node.position.x))
+  const maxX = Math.max(...positionedNodes.map((node) => node.position.x + node.width))
+  const minY = Math.min(...positionedNodes.map((node) => node.position.y))
+  const centerOffsetX = horizontalMargin + totalWidth / 2 - (minX + maxX) / 2
+  const topOffsetY = -minY + 56
+
+  positionedNodes.forEach((node) => {
+    node.position = {
+      x: node.position.x + centerOffsetX,
+      y: node.position.y + topOffsetY,
+    }
+  })
+
+  return positionedNodes
 }
 
 export function GraphCanvas() {
@@ -64,15 +174,12 @@ export function GraphCanvas() {
     )
   }, [session])
 
-  const rfEdges = useMemo<RFEdge[]>(() => {
+  const baseEdges = useMemo<RFEdge[]>(() => {
     if (!session) return []
     return session.edges.map((edge) => ({
       id: edge.id,
       source: edge.from,
       target: edge.to,
-      label: edge.label ?? undefined,
-      style: { strokeWidth: 1, stroke: '#94a3b8' },
-      labelStyle: { fill: '#64748b', fontSize: 11, fontWeight: 600 },
     }))
   }, [session])
 
@@ -100,11 +207,62 @@ export function GraphCanvas() {
       type: node.node_state === 'grayed' ? 'grayedNode' : 'phase2Node',
       position: { x: 0, y: 0 },
       data: { node, reportSize },
-      targetPosition: Position.Left,
-      sourcePosition: Position.Right,
+      targetPosition: Position.Top,
+      sourcePosition: Position.Bottom,
     }))
-    return getLayoutedElements(nodes, rfEdges)
-  }, [graphNodes, nodeSizes, reportSize, rfEdges])
+    return getLayoutedElements(nodes, baseEdges)
+  }, [baseEdges, graphNodes, nodeSizes, reportSize])
+
+  const rfEdges = useMemo<RFEdge<CenterLineEdgeData>[]>(() => {
+    if (!session) return []
+
+    const nodeLookup = new Map(
+      rfNodes.map((node) => [
+        node.id,
+        {
+          x: node.position.x,
+          y: node.position.y,
+          width: Number(node.style?.width ?? 0),
+          height: Number(node.style?.height ?? 0),
+        },
+      ]),
+    )
+
+    return session.edges.flatMap((edge) => {
+      const sourceNode = nodeLookup.get(edge.from)
+      const targetNode = nodeLookup.get(edge.to)
+      if (!sourceNode || !targetNode) {
+        return []
+      }
+
+      return [
+        {
+          id: edge.id,
+          source: edge.from,
+          target: edge.to,
+          type: 'centerLine',
+          animated: false,
+          style: { strokeWidth: 2.25, stroke: '#94a3b8', strokeLinecap: 'round' },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 18,
+            height: 18,
+            color: '#94a3b8',
+          },
+          data: {
+            sourceCenter: {
+              x: sourceNode.x + sourceNode.width / 2,
+              y: sourceNode.y + sourceNode.height / 2,
+            },
+            targetCenter: {
+              x: targetNode.x + targetNode.width / 2,
+              y: targetNode.y + targetNode.height / 2,
+            },
+          },
+        },
+      ]
+    })
+  }, [rfNodes, session])
 
   useEffect(() => {
     if (!session) {
@@ -147,20 +305,21 @@ export function GraphCanvas() {
           Phase II Roadmap
         </p>
         <h2 className="mt-1 font-serif-display text-[24px] leading-none text-[var(--ink)]">
-          Build the chain one prerequisite at a time
+          Follow the hierarchy from top to bottom
         </h2>
         <p className="mt-2 text-[13px] leading-6 text-[var(--muted)]">
-          Each square is just the topic title. Click any node to focus it, then use the overlay for `Know`, `Don&apos;t know`,
-          `Explain more`, resources, and chat.
+          Each row is a prerequisite depth. Follow the straight downward tree arrows, then click any node to focus it for
+          `Know`, `Don&apos;t know`, `Explain more`, resources, and chat.
         </p>
       </div>
       <ReactFlow
         className="phase-two-flow"
-        defaultEdgeOptions={{ type: 'smoothstep' }}
+        defaultEdgeOptions={{ type: 'centerLine' }}
         fitView
         fitViewOptions={{ padding: 0.18, maxZoom: 1 }}
         nodes={rfNodes}
         edges={rfEdges}
+        edgeTypes={edgeTypes}
         nodeTypes={nodeTypes}
         nodesFocusable
         onNodeClick={(_, node) => setFocusedNodeId(node.id)}

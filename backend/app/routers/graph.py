@@ -75,21 +75,22 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
 
                 if existing is not None:
                     child = existing
+                    merged_child_ids[incoming_child.id] = child.id
                     if child.description is None or (
                         incoming_child.description
                         and len(incoming_child.description) > len(child.description or "")
                     ):
                         child.description = incoming_child.description
-                    if child.parent_id is None:
-                        child.parent_id = node.id
-                else:
-                    child = incoming_child
-                    child.parent_id = node.id
-                    child.depth = node.depth + 1
-                    child.phase = "2"
-                    child.node_state = "grayed"
-                    session.nodes[child.id] = child
+                    normalize_phase2_graph(session)
+                    save_session(session)
+                    continue
 
+                child = incoming_child
+                child.parent_id = node.id
+                child.depth = node.depth + 1
+                child.phase = "2"
+                child.node_state = "grayed"
+                session.nodes[child.id] = child
                 merged_child_ids[incoming_child.id] = child.id
                 if child.id not in node.child_ids:
                     node.child_ids.append(child.id)
@@ -100,11 +101,19 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
 
             if event_name == "edge_added":
                 raw_edge = GraphEdge.model_validate(data)
-                canonical_child_id = merged_child_ids.get(raw_edge.to_id, raw_edge.to_id)
-                child = session.nodes.get(canonical_child_id)
+                child_id = merged_child_ids.get(raw_edge.to_id, raw_edge.to_id)
+                child = session.nodes.get(child_id)
                 if child is None:
                     continue
-                edge = upsert_phase2_edge(session, node.id, child.id, raw_edge.label)
+                if child.parent_id not in {None, node.id}:
+                    normalize_phase2_graph(session)
+                    save_session(session)
+                    continue
+                edge = upsert_phase2_edge(session, node.id, child.id, None)
+                if edge is None:
+                    normalize_phase2_graph(session)
+                    save_session(session)
+                    continue
                 recompute_phase2_depths(session)
                 normalize_phase2_graph(session)
                 save_session(session)

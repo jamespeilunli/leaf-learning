@@ -1,4 +1,4 @@
-import { ExternalLink, Loader2, MessageSquareText, Trash2, X } from 'lucide-react'
+import { Check, ExternalLink, Loader2, MessageSquareText, Trash2, X, X as XIcon } from 'lucide-react'
 
 import { useSessionStore } from '../store/useSessionStore'
 import type { GraphNode } from '../types'
@@ -91,10 +91,11 @@ export function Phase2FocusOverlay({ node, onClose }: Phase2FocusOverlayProps) {
             {!isKnownGhost ? (
               <div className="mt-6 flex flex-wrap items-center gap-3">
                 <button
-                  className="rounded-full border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--ink)] transition hover:border-[var(--accent)]"
+                  className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--ink)] transition hover:border-[var(--accent)]"
                   type="button"
                   onClick={() => void markLearned(node.id)}
                 >
+                  <Check className="h-4 w-4" />
                   Know
                 </button>
                 <button
@@ -103,6 +104,7 @@ export function Phase2FocusOverlay({ node, onClose }: Phase2FocusOverlayProps) {
                   onClick={() => void expandNode(node.id)}
                 >
                   {isExpanding ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  {!isExpanding ? <XIcon className="h-4 w-4" /> : null}
                   Don&apos;t know
                 </button>
                 <button
@@ -150,14 +152,18 @@ export function Phase2FocusOverlay({ node, onClose }: Phase2FocusOverlayProps) {
             <div className="mt-6 flex flex-wrap items-center gap-3">
               {isLearned ? (
                 <span className="rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
-                  ✓ Know
+                  <span className="inline-flex items-center gap-2">
+                    <Check className="h-4 w-4" />
+                    Know
+                  </span>
                 </span>
               ) : (
                 <button
-                  className="rounded-full bg-[var(--ink)] px-4 py-2 text-sm font-semibold text-[var(--paper)] transition hover:bg-[var(--accent)]"
+                  className="inline-flex items-center gap-2 rounded-full bg-[var(--ink)] px-4 py-2 text-sm font-semibold text-[var(--paper)] transition hover:bg-[var(--accent)]"
                   type="button"
                   onClick={() => void markLearned(node.id)}
                 >
+                  <Check className="h-4 w-4" />
                   Know
                 </button>
               )}
