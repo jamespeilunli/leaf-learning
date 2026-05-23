@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.ai import generate_phase1_children
+from app.graph_utils import normalize_phase2_graph
 from app.models import GraphNode, Resolution, Session
 from app.storage import list_sessions, load_session, save_session
 
@@ -76,7 +77,10 @@ async def create_session(payload: CreateSessionRequest) -> dict:
 
 @router.get("/session/{session_id}")
 def get_session(session_id: str) -> dict:
-    return load_session(session_id).model_dump(by_alias=True)
+    session = load_session(session_id)
+    normalize_phase2_graph(session)
+    save_session(session)
+    return session.model_dump(by_alias=True)
 
 
 @router.get("/sessions")
@@ -138,5 +142,6 @@ def deep_dive(session_id: str, payload: DeepDiveRequest) -> dict:
     session.focus_node_id = payload.node_id
     session.phase = "2"
     node.phase = "2"
+    normalize_phase2_graph(session)
     save_session(session)
     return {"session": session.model_dump(by_alias=True)}

@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.ai import chat_with_node
+from app.graph_utils import normalize_phase2_graph
 from app.models import ChatMessage, GraphNode, Session
 from app.storage import load_session, save_session
 
@@ -44,6 +45,7 @@ def _goal_path(session: Session, node: GraphNode) -> list[str]:
 @router.post("/session/{session_id}/node/{node_id}/chat")
 async def chat(session_id: str, node_id: str, payload: ChatRequest) -> StreamingResponse:
     session = load_session(session_id)
+    normalize_phase2_graph(session)
     node = _get_node(session, node_id)
     if node.node_state not in {"expanded", "learned"}:
         raise HTTPException(status_code=400, detail="Node chat is only available for expanded nodes.")

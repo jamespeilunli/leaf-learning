@@ -121,6 +121,8 @@ Return ONLY a JSON object with this exact shape:
 
 intuition_score must be a float from 0.0 (purely conceptual) to 1.0 (highly technical/formal).
 prerequisites must be topics directly used or assumed by the resource — not general background.
+Use concise, canonical prerequisite titles so equivalent topics collapse to the same name.
+Avoid duplicates, near-duplicates, plural/singular variants, and acronym/full-name variants in the same result.
 Do NOT include any of these topics as prerequisites, the user already knows them: {known_topics}
 Return ONLY the JSON object. No prose, no markdown fences.
 """.strip()

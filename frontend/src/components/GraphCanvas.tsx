@@ -1,8 +1,9 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 import dagre from 'dagre'
 import ReactFlow, { Background, Controls, MiniMap } from 'reactflow'
 import type { Edge as RFEdge, Node as RFNode } from 'reactflow'
+import { Position } from 'reactflow'
 
 import { useSessionStore } from '../store/useSessionStore'
 import type { GraphNode as AppGraphNode } from '../types'
@@ -11,17 +12,42 @@ import { Phase2Node } from './Phase2Node'
 
 const nodeTypes = { phase2Node: Phase2Node, grayedNode: GrayedNode }
 
-function getLayoutedElements(
-  nodes: RFNode[],
-  edges: RFEdge[],
-  nodeWidth = 280,
-  nodeHeight = 170,
-) {
+export interface GraphCanvasNodeData {
+  node: AppGraphNode
+  reportSize: (nodeId: string, width: number, height: number) => void
+}
+
+type LayoutNode = RFNode<GraphCanvasNodeData> & {
+  width: number
+  height: number
+}
+
+function getNodeDimensions(node: AppGraphNode): { width: number; height: number } {
+  const lineEstimate = Math.ceil((node.explain_more_text?.length ?? node.description?.length ?? 0) / 52)
+
+  if (node.node_state === 'grayed') {
+    if (node.explain_more_text === '__known__') {
+      return { width: 260, height: 110 }
+    }
+    if (node.explain_more_text) {
+      return { width: 280, height: 320 + lineEstimate * 10 }
+    }
+    return { width: 280, height: 220 }
+  }
+
+  if (node.node_state === 'learned') {
+    return { width: 300, height: 250 }
+  }
+
+  return { width: 300, height: 280 }
+}
+
+function getLayoutedElements(nodes: LayoutNode[], edges: RFEdge[]) {
   const graph = new dagre.graphlib.Graph()
   graph.setDefaultEdgeLabel(() => ({}))
-  graph.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 100 })
+  graph.setGraph({ rankdir: 'LR', align: 'UL', nodesep: 92, ranksep: 150, marginx: 56, marginy: 56 })
 
-  nodes.forEach((node) => graph.setNode(node.id, { width: nodeWidth, height: nodeHeight }))
+  nodes.forEach((node) => graph.setNode(node.id, { width: node.width, height: node.height }))
   edges.forEach((edge) => graph.setEdge(edge.source, edge.target))
   dagre.layout(graph)
 
@@ -29,13 +55,15 @@ function getLayoutedElements(
     const { x, y } = graph.node(node.id)
     return {
       ...node,
-      position: { x: x - nodeWidth / 2, y: y - nodeHeight / 2 },
+      position: { x: x - node.width / 2, y: y - node.height / 2 },
+      style: { width: node.width },
     }
   })
 }
 
 export function GraphCanvas() {
   const session = useSessionStore((state) => state.session)
+  const [nodeSizes, setNodeSizes] = useState<Record<string, { width: number; height: number }>>({})
 
   const graphNodes = useMemo(() => {
     if (!session) return []
@@ -56,28 +84,71 @@ export function GraphCanvas() {
     }))
   }, [session])
 
+  const reportSize = useCallback((nodeId: string, width: number, height: number) => {
+    setNodeSizes((current) => {
+      const roundedWidth = Math.ceil(width)
+      const roundedHeight = Math.ceil(height)
+      const previous = current[nodeId]
+
+      if (previous && previous.width === roundedWidth && previous.height === roundedHeight) {
+        return current
+      }
+
+      return {
+        ...current,
+        [nodeId]: { width: roundedWidth, height: roundedHeight },
+      }
+    })
+  }, [])
+
   const rfNodes = useMemo<RFNode[]>(() => {
-    const nodes = graphNodes.map((node: AppGraphNode) => ({
+    const nodes: LayoutNode[] = graphNodes.map((node: AppGraphNode) => ({
+      ...(nodeSizes[node.id] ?? getNodeDimensions(node)),
       id: node.id,
       type: node.node_state === 'grayed' ? 'grayedNode' : 'phase2Node',
       position: { x: 0, y: 0 },
-      data: { node },
+      data: { node, reportSize },
+      targetPosition: Position.Left,
+      sourcePosition: Position.Right,
     }))
     return getLayoutedElements(nodes, rfEdges)
-  }, [graphNodes, rfEdges])
+  }, [graphNodes, nodeSizes, reportSize, rfEdges])
 
   if (!session) return null
 
   return (
-    <div className="h-screen w-full bg-[radial-gradient(circle_at_top,rgba(14,165,233,0.12),transparent_35%),linear-gradient(180deg,#f6f6f2_0%,#eef2f7_100%)]">
+    <div className="relative h-screen w-full overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(191,91,44,0.14),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(34,197,94,0.1),transparent_26%),linear-gradient(180deg,#f8f4ec_0%,#eef3f8_100%)]">
+      <div className="pointer-events-none absolute left-5 top-5 z-20 max-w-md rounded-[24px] border border-white/70 bg-white/78 px-5 py-4 shadow-[0_24px_60px_rgba(15,23,42,0.10)] backdrop-blur">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted-strong)]">
+          Phase II Roadmap
+        </p>
+        <h2 className="mt-1 font-serif-display text-[24px] leading-none text-[var(--ink)]">
+          Build the chain one prerequisite at a time
+        </h2>
+        <p className="mt-2 text-[13px] leading-6 text-[var(--muted)]">
+          Read left to right. Use <span className="font-semibold text-[var(--ink)]">Know</span> to mark a topic as covered,{' '}
+          <span className="font-semibold text-[var(--ink)]">Don&apos;t know</span> to branch deeper, and{' '}
+          <span className="font-semibold text-[var(--ink)]">Explain more</span> when you need the boundary clarified first.
+        </p>
+      </div>
       <ReactFlow
+        className="phase-two-flow"
         defaultEdgeOptions={{ type: 'smoothstep' }}
         fitView
+        fitViewOptions={{ padding: 0.18, maxZoom: 1 }}
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
+        nodesFocusable
+        panOnScroll
       >
-        <MiniMap pannable zoomable />
+        <MiniMap
+          pannable
+          zoomable
+          className="!rounded-[18px] !border !border-[var(--line)] !bg-white/90 !shadow-[0_12px_30px_rgba(15,23,42,0.12)]"
+          maskColor="rgba(248, 250, 252, 0.75)"
+          nodeColor={(node) => (node.type === 'grayedNode' ? '#cbd5e1' : '#bf5b2c')}
+        />
         <Controls />
         <Background color="#dbe3ef" gap={18} size={1} />
       </ReactFlow>
