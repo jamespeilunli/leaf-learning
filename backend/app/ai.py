@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator
 from openai import AsyncOpenAI
 
 from app import mock_ai
-from app.models import ChatMessage, GraphEdge, GraphNode, Resource
+from app.models import ChatMessage, ExampleProject, GraphEdge, GraphNode, Resource
 
 
 MODEL = "gpt-4o"
@@ -117,21 +117,69 @@ Do not repeat or rephrase topics already in the selection path.
         yield {"event": "stream_error", "data": {"message": str(exc)}}
 
 
+async def generate_example_project(
+    node_label: str, ancestor_labels: list[str]
+) -> ExampleProject:
+    if using_mock_ai():
+        return await mock_ai.generate_example_project(node_label, ancestor_labels)
+
+    instructions = f"""
+You generate concrete project anchors for technical learning roadmaps.
+The user chose to deep dive on "{node_label}".
+Their selection path, most general to most specific, is: {ancestor_labels}.
+
+Return ONLY a JSON object with this exact shape:
+{{
+  "title": "string (a specific project, not a generic category)",
+  "description": "string (2 sentences describing what the learner will build or analyze)"
+}}
+
+The project must be concrete enough that future prerequisite nodes can be taught through it.
+For example, for "gamepiece detection", a valid project could be "tennis ball detection".
+Do not make the project broader than the selected topic.
+Return ONLY the JSON object. No prose, no markdown fences.
+""".strip()
+
+    response = await get_client().responses.create(
+        model=MODEL,
+        instructions=instructions,
+        input=f"Generate one concrete example project for {node_label}.",
+    )
+    payload = _loads_json_object(_extract_response_text(response))
+    return ExampleProject.model_validate(payload)
+
+
 async def expand_phase2_node(
-    node_label: str, known_topics: list[str], goal_label: str
+    node_label: str,
+    known_topics: list[str],
+    goal_label: str,
+    example_project: ExampleProject | None = None,
 ) -> AsyncGenerator[dict, None]:
     if using_mock_ai():
         async for event in mock_ai.expand_phase2_node(
             node_label,
             known_topics,
             goal_label,
+            example_project,
         ):
             yield event
         return
 
+    project_instruction = ""
+    if example_project:
+        project_instruction = f"""
+The user chose to anchor this deep-dive graph around a concrete example project:
+Project title: {example_project.title}
+Project description: {example_project.description}
+
+All resources and prerequisites must be selected for their relevance to this project.
+Frame prerequisite hints around how the idea is used in the project, not as generic background.
+""".strip()
+
     instructions = f"""
 You are a learning roadmap assistant. The user's goal is to understand "{goal_label}".
 Explain topics at a technical level with formal, precise, mechanism-focused detail.
+{project_instruction}
 
 Search for and read the best resource that genuinely explains "{node_label}" at this technical level.
 The resource must explain the topic in depth, not just introduce it.

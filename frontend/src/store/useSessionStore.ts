@@ -27,7 +27,7 @@ interface SessionStore {
   loadSession: (id: string) => Promise<void>
   selectTopic: (nodeId: string) => Promise<void>
   back: () => Promise<void>
-  deepDive: (nodeId: string) => Promise<void>
+  deepDive: (nodeId: string, projectify?: boolean) => Promise<void>
   expandNode: (nodeId: string) => Promise<void>
   explainNode: (nodeId: string) => Promise<void>
   markLearned: (nodeId: string) => Promise<void>
@@ -121,13 +121,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  async deepDive(nodeId) {
+  async deepDive(nodeId, projectify = false) {
     const sessionId = get().sessionId
     if (!sessionId) return
 
     set({ isLoading: true, error: null })
     try {
-      const response = await api.deepDive(sessionId, nodeId)
+      const response = await api.deepDive(sessionId, nodeId, projectify)
       set({ session: response.session, isLoading: false })
     } catch (error) {
       set({

@@ -7,6 +7,11 @@ export interface Resource {
   description: string
 }
 
+export interface ExampleProject {
+  title: string
+  description: string
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -44,6 +49,7 @@ export interface Session {
   selection_history: string[]
   current_phase1_node_id: string | null
   focus_node_id: string | null
+  example_project: ExampleProject | null
   known_topics: string[]
   nodes: Record<string, GraphNode>
   edges: GraphEdge[]

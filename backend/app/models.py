@@ -26,6 +26,11 @@ class Resource(BaseModel):
     description: str
 
 
+class ExampleProject(BaseModel):
+    title: str
+    description: str
+
+
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str
@@ -65,6 +70,7 @@ class Session(BaseModel):
     selection_history: list[str] = Field(default_factory=list)
     current_phase1_node_id: str | None = None
     focus_node_id: str | None = None
+    example_project: ExampleProject | None = None
     known_topics: list[str] = Field(default_factory=list)
     nodes: dict[str, GraphNode] = Field(default_factory=dict)
     edges: list[GraphEdge] = Field(default_factory=list)

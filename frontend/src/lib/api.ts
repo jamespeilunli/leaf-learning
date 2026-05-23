@@ -38,8 +38,12 @@ export async function back(sessionId: string): Promise<Session> {
 export async function deepDive(
   sessionId: string,
   nodeId: string,
+  projectify = false,
 ): Promise<{ session: Session }> {
-  const response = await http.post(`/session/${sessionId}/deep-dive`, { node_id: nodeId })
+  const response = await http.post(`/session/${sessionId}/deep-dive`, {
+    node_id: nodeId,
+    projectify,
+  })
   return response.data
 }
 

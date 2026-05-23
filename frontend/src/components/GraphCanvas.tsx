@@ -84,10 +84,15 @@ export function GraphCanvas() {
           <ArrowLeft className="h-4 w-4" />
           Back
         </button>
-        <div className="pointer-events-auto max-w-[min(520px,calc(100vw-7rem))] rounded-full border border-white/70 bg-white/82 px-4 py-2 text-right shadow-[0_14px_34px_rgba(15,23,42,0.10)] backdrop-blur">
+        <div className="pointer-events-auto max-w-[min(620px,calc(100vw-7rem))] rounded-[18px] border border-white/70 bg-white/82 px-4 py-2 text-right shadow-[0_14px_34px_rgba(15,23,42,0.10)] backdrop-blur">
           <div className="truncate text-sm font-semibold text-[var(--ink)]">
             {focusNode?.label ?? session.root_topic}
           </div>
+          {session.example_project ? (
+            <div className="mt-0.5 truncate text-xs font-medium text-[var(--muted)]">
+              Project: {session.example_project.title}
+            </div>
+          ) : null}
         </div>
       </div>
       <ReactFlow

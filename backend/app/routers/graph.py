@@ -66,6 +66,7 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
             node.label,
             session.known_topics,
             goal_label,
+            session.example_project,
         ):
             event_name = event["event"]
             data = event["data"]

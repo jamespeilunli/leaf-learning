@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import AsyncGenerator
 
-from app.models import ChatMessage, GraphEdge, GraphNode, Resource
+from app.models import ChatMessage, ExampleProject, GraphEdge, GraphNode, Resource
 
 
 Subject = dict[str, list[dict[str, str]]]
@@ -255,12 +255,34 @@ def _generic_deep_dive(node_label: str) -> dict[str, object]:
     }
 
 
+async def generate_example_project(node_label: str, ancestor_labels: list[str]) -> ExampleProject:
+    return ExampleProject(
+        title="Mock Applied Learning Project",
+        description=(
+            "Build a small end-to-end prototype that turns a realistic input into a visible "
+            "result, then use every future node as a concrete design or implementation step "
+            "inside that same prototype."
+        ),
+    )
+
+
 async def expand_phase2_node(
-    node_label: str, known_topics: list[str], goal_label: str
+    node_label: str,
+    known_topics: list[str],
+    goal_label: str,
+    example_project: ExampleProject | None = None,
 ) -> AsyncGenerator[dict, None]:
     fixture = DEEP_DIVE_FIXTURES.get(_key(node_label)) or _generic_deep_dive(node_label)
 
-    resource = Resource.model_validate(fixture["resource"])
+    resource_payload = dict(fixture["resource"])
+    if example_project:
+        resource_payload["title"] = f"Mock Project Step: {node_label}"
+        resource_payload["description"] = (
+            f"For {example_project.title}, this mock resource applies {node_label} to the "
+            f"project context: {example_project.description}"
+        )
+
+    resource = Resource.model_validate(resource_payload)
     yield {
         "event": "node_updated",
         "data": {
@@ -272,7 +294,10 @@ async def expand_phase2_node(
     for label, hint in fixture["prerequisites"]:
         if _key(label) in known:
             continue
-        node = GraphNode(label=label, description=hint, phase="2", node_state="grayed")
+        description = hint
+        if example_project:
+            description = f"{hint} In the project graph, learn it as part of {example_project.title}."
+        node = GraphNode(label=label, description=description, phase="2", node_state="grayed")
         yield {"event": "node_added", "data": node.model_dump(by_alias=True)}
         edge = GraphEdge(from_id=node_label, to_id=node.id, label="requires")
         yield {"event": "edge_added", "data": edge.model_dump(by_alias=True)}
