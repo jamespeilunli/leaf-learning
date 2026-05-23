@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
+from app.ai import using_mock_ai
 from app.models import GraphNode
 from app.storage import load_session, save_session
 
@@ -22,6 +24,25 @@ class ApiFlowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         return payload["session_id"], payload["session"]
+
+    def test_test_client_forces_mock_ai_mode(self) -> None:
+        with patch.dict("os.environ", {"ALPHAG3N_AI_MODE": "openai"}):
+            self.client = test_client()
+            session_id, session = self.create_machine_learning_session()
+
+        root_id = session["current_phase1_node_id"]
+        self.assertEqual(session["root_topic"], "machine learning")
+        self.assertGreaterEqual(len(session["nodes"][root_id]["child_ids"]), 4)
+        self.assertIsInstance(session_id, str)
+        self.assertTrue(using_mock_ai())
+
+    def test_test_client_allows_real_ai_when_explicitly_requested(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ALPHAG3N_AI_MODE": "openai", "ALPHAG3N_TEST_ALLOW_REAL_AI": "1"},
+        ):
+            self.client = test_client()
+            self.assertFalse(using_mock_ai())
 
     def test_session_creation_listing_selection_back_resolution_and_deep_dive(self) -> None:
         session_id, session = self.create_machine_learning_session()
