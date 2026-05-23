@@ -113,6 +113,32 @@ async def select_topic(session_id: str, payload: SelectTopicRequest) -> dict:
     return session.model_dump(by_alias=True)
 
 
+@router.post("/session/{session_id}/phase1-expand")
+async def expand_phase1_topic(session_id: str, payload: SelectTopicRequest) -> dict:
+    session = load_session(session_id)
+    selected = _get_node(session, payload.node_id)
+
+    if selected.phase != "1":
+        raise HTTPException(status_code=400, detail="Only Phase 1 nodes can be expanded here.")
+
+    if selected.child_ids:
+        save_session(session)
+        return session.model_dump(by_alias=True)
+
+    async for event in generate_phase1_children(selected.label, _ancestor_labels(session, selected)):
+        if event["event"] == "node_added":
+            child = GraphNode.model_validate(event["data"])
+            child.parent_id = payload.node_id
+            child.depth = selected.depth + 1
+            session.nodes[child.id] = child
+            selected.child_ids.append(child.id)
+        elif event["event"] == "stream_error":
+            raise HTTPException(status_code=502, detail=event["data"]["message"])
+
+    save_session(session)
+    return session.model_dump(by_alias=True)
+
+
 @router.post("/session/{session_id}/back")
 def back(session_id: str) -> dict:
     session = load_session(session_id)

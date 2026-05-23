@@ -27,6 +27,7 @@ interface SessionStore {
   initSession: (topic: string) => Promise<void>
   loadSession: (id: string) => Promise<void>
   selectTopic: (nodeId: string) => Promise<void>
+  expandPhase1Topic: (nodeId: string) => Promise<void>
   back: () => Promise<void>
   setResolution: (r: Resolution) => Promise<void>
   deepDive: (nodeId: string) => Promise<void>
@@ -102,6 +103,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       set({
         isLoading: false,
         error: error instanceof Error ? error.message : 'Failed to select topic.',
+      })
+    }
+  },
+
+  async expandPhase1Topic(nodeId) {
+    const sessionId = get().sessionId
+    if (!sessionId) return
+
+    set({ isLoading: true, error: null })
+    try {
+      const session = await api.expandPhase1Topic(sessionId, nodeId)
+      set({ session, isLoading: false })
+    } catch (error) {
+      set({
+        isLoading: false,
+        error: error instanceof Error ? error.message : 'Failed to expand topic.',
       })
     }
   },
