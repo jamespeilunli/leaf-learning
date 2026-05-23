@@ -11,6 +11,7 @@ __pycache__/
 .mypy_cache/
 .venv/
 venv/
+backend/sessions/
 
 # Node / Vite
 node_modules/

@@ -1,22 +1,53 @@
 @import "tailwindcss";
 
 :root {
-  font-family:
-    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
-  color: #15120d;
-  background: #f7f5ef;
+  --bg: #f4f4ef;
+  --paper: #fbfaf5;
+  --panel: #eef2f6;
+  --ink: #18212d;
+  --muted: #5d6773;
+  --muted-strong: #6b7280;
+  --line: #d8dee8;
+  --accent: #bf5b2c;
+  --accent-soft: #f6e1d5;
+  --danger: #b42318;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: var(--bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+* {
+  box-sizing: border-box;
+}
+
+html,
 body {
   margin: 0;
+  min-height: 100%;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.font-serif-display {
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
 }
 
 button,
 textarea {
   font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
 }
