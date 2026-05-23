@@ -25,7 +25,7 @@ trap cleanup EXIT INT TERM
 
 (
   cd "$BACKEND_DIR"
-  UV_CACHE_DIR=/tmp/uv-cache uv run uvicorn app.main:app --reload --port 8000
+  ALPHAG3N_AI_MODE="${ALPHAG3N_AI_MODE:-mock}" UV_CACHE_DIR=/tmp/uv-cache uv run uvicorn app.main:app --reload --port 8000
 ) &
 BACKEND_PID=$!
 

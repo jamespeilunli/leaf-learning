@@ -1,15 +1,25 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import AsyncGenerator
 
 from openai import AsyncOpenAI
 
+from app import mock_ai
 from app.models import ChatMessage, GraphEdge, GraphNode, Resource
 
 
 MODEL = "gpt-4o"
+API_KEY_PLACEHOLDER = "sk-your-key-here"
 _client: AsyncOpenAI | None = None
+
+
+def using_mock_ai() -> bool:
+    mode = os.getenv("ALPHAG3N_AI_MODE", "").strip().lower()
+    if mode == "openai":
+        return False
+    return True
 
 
 def get_client() -> AsyncOpenAI:
@@ -51,6 +61,11 @@ def _loads_json_object(text: str) -> dict:
 async def generate_phase1_children(
     current_label: str, ancestor_labels: list[str]
 ) -> AsyncGenerator[dict, None]:
+    if using_mock_ai():
+        async for event in mock_ai.generate_phase1_children(current_label, ancestor_labels):
+            yield event
+        return
+
     instructions = f"""
 You generate a learning topic exploration tree.
 Return ONLY a JSON object with this exact shape:
@@ -95,6 +110,16 @@ Do not repeat or rephrase topics already in the selection path.
 async def expand_phase2_node(
     node_label: str, resolution: str, known_topics: list[str], goal_label: str
 ) -> AsyncGenerator[dict, None]:
+    if using_mock_ai():
+        async for event in mock_ai.expand_phase2_node(
+            node_label,
+            resolution,
+            known_topics,
+            goal_label,
+        ):
+            yield event
+        return
+
     instructions = f"""
 You are a learning roadmap assistant. The user's goal is to understand "{goal_label}".
 They prefer a {resolution} level of understanding
@@ -162,6 +187,14 @@ Return ONLY the JSON object. No prose, no markdown fences.
 async def explain_prerequisite(
     node_label: str, parent_label: str, parent_description: str, resolution: str
 ) -> str:
+    if using_mock_ai():
+        return await mock_ai.explain_prerequisite(
+            node_label,
+            parent_label,
+            parent_description,
+            resolution,
+        )
+
     instructions = f"""
 You are a tutor explaining prerequisite concepts.
 The user is studying "{parent_label}" ({parent_description}).
@@ -189,6 +222,19 @@ async def chat_with_node(
     history: list[ChatMessage],
     user_message: str,
 ) -> AsyncGenerator[str, None]:
+    if using_mock_ai():
+        async for chunk in mock_ai.chat_with_node(
+            node_label,
+            node_description,
+            resource_description,
+            resolution,
+            goal_path,
+            history,
+            user_message,
+        ):
+            yield chunk
+        return
+
     truncated_history = history[-20:]
     instructions = f"""
 You are a focused tutor helping the user understand "{node_label}".
