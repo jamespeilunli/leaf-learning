@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react'
 import ReactFlow, { Background, Controls, MiniMap } from 'reactflow'
 import type { Edge as RFEdge, Node as RFNode } from 'reactflow'
 import { MarkerType, Position } from 'reactflow'
+import type { ReactFlowInstance } from 'reactflow'
 
 import { useSessionStore } from '../store/useSessionStore'
 import type { GraphNode as AppGraphNode } from '../types'
@@ -165,6 +166,7 @@ export function GraphCanvas() {
   const session = useSessionStore((state) => state.session)
   const [nodeSizes, setNodeSizes] = useState<Record<string, { width: number; height: number }>>({})
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
+  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null)
   const restartFlow = useSessionStore((state) => state.restartFlow)
 
   const graphNodes = useMemo(() => {
@@ -277,6 +279,26 @@ export function GraphCanvas() {
     setFocusedNodeId(null)
   }, [focusedNodeId, session])
 
+  const activeNodeId = focusedNodeId ?? session?.focus_node_id ?? null
+
+  useEffect(() => {
+    if (!flowInstance || !activeNodeId) {
+      return
+    }
+
+    const activeNode = rfNodes.find((node) => node.id === activeNodeId)
+    if (!activeNode) {
+      return
+    }
+
+    const width = Number(activeNode.style?.width ?? 0)
+    const height = Number(activeNode.style?.height ?? 0)
+    flowInstance.setCenter(activeNode.position.x + width / 2, activeNode.position.y + height / 2, {
+      duration: 320,
+      zoom: Math.min(flowInstance.getZoom(), 1),
+    })
+  }, [activeNodeId, flowInstance, rfNodes])
+
   if (!session) return null
   const focusNode = session.focus_node_id ? session.nodes[session.focus_node_id] : null
   const focusedNode = focusedNodeId ? session.nodes[focusedNodeId] ?? null : null
@@ -322,6 +344,7 @@ export function GraphCanvas() {
         edgeTypes={edgeTypes}
         nodeTypes={nodeTypes}
         nodesFocusable
+        onInit={setFlowInstance}
         onNodeClick={(_, node) => setFocusedNodeId(node.id)}
         onPaneClick={() => setFocusedNodeId(null)}
         panOnScroll
