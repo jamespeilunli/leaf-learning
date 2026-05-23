@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import dagre from 'dagre'
 import { ArrowLeft } from 'lucide-react'
@@ -9,6 +9,7 @@ import { Position } from 'reactflow'
 import { useSessionStore } from '../store/useSessionStore'
 import type { GraphNode as AppGraphNode } from '../types'
 import { GrayedNode } from './GrayedNode'
+import { Phase2FocusOverlay } from './Phase2FocusOverlay'
 import { Phase2Node } from './Phase2Node'
 
 const nodeTypes = { phase2Node: Phase2Node, grayedNode: GrayedNode }
@@ -24,23 +25,11 @@ type LayoutNode = RFNode<GraphCanvasNodeData> & {
 }
 
 function getNodeDimensions(node: AppGraphNode): { width: number; height: number } {
-  const lineEstimate = Math.ceil((node.explain_more_text?.length ?? node.description?.length ?? 0) / 52)
-
   if (node.node_state === 'grayed') {
-    if (node.explain_more_text === '__known__') {
-      return { width: 260, height: 110 }
-    }
-    if (node.explain_more_text) {
-      return { width: 280, height: 320 + lineEstimate * 10 }
-    }
-    return { width: 280, height: 220 }
+    return { width: 168, height: 112 }
   }
 
-  if (node.node_state === 'learned') {
-    return { width: 300, height: 250 }
-  }
-
-  return { width: 300, height: 280 }
+  return { width: 180, height: 112 }
 }
 
 function getLayoutedElements(nodes: LayoutNode[], edges: RFEdge[]) {
@@ -65,6 +54,7 @@ function getLayoutedElements(nodes: LayoutNode[], edges: RFEdge[]) {
 export function GraphCanvas() {
   const session = useSessionStore((state) => state.session)
   const [nodeSizes, setNodeSizes] = useState<Record<string, { width: number; height: number }>>({})
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
   const restartFlow = useSessionStore((state) => state.restartFlow)
 
   const graphNodes = useMemo(() => {
@@ -116,8 +106,22 @@ export function GraphCanvas() {
     return getLayoutedElements(nodes, rfEdges)
   }, [graphNodes, nodeSizes, reportSize, rfEdges])
 
+  useEffect(() => {
+    if (!session) {
+      setFocusedNodeId(null)
+      return
+    }
+
+    if (focusedNodeId && session.nodes[focusedNodeId]) {
+      return
+    }
+
+    setFocusedNodeId(null)
+  }, [focusedNodeId, session])
+
   if (!session) return null
   const focusNode = session.focus_node_id ? session.nodes[session.focus_node_id] : null
+  const focusedNode = focusedNodeId ? session.nodes[focusedNodeId] ?? null : null
 
   return (
     <div className="relative h-screen w-full overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(191,91,44,0.14),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(34,197,94,0.1),transparent_26%),linear-gradient(180deg,#f8f4ec_0%,#eef3f8_100%)]">
@@ -146,9 +150,8 @@ export function GraphCanvas() {
           Build the chain one prerequisite at a time
         </h2>
         <p className="mt-2 text-[13px] leading-6 text-[var(--muted)]">
-          Read left to right. Use <span className="font-semibold text-[var(--ink)]">Know</span> to mark a topic as covered,{' '}
-          <span className="font-semibold text-[var(--ink)]">Don&apos;t know</span> to branch deeper, and{' '}
-          <span className="font-semibold text-[var(--ink)]">Explain more</span> when you need the boundary clarified first.
+          Each square is just the topic title. Click any node to focus it, then use the overlay for `Know`, `Don&apos;t know`,
+          `Explain more`, resources, and chat.
         </p>
       </div>
       <ReactFlow
@@ -160,6 +163,8 @@ export function GraphCanvas() {
         edges={rfEdges}
         nodeTypes={nodeTypes}
         nodesFocusable
+        onNodeClick={(_, node) => setFocusedNodeId(node.id)}
+        onPaneClick={() => setFocusedNodeId(null)}
         panOnScroll
       >
         <MiniMap
@@ -172,6 +177,7 @@ export function GraphCanvas() {
         <Controls />
         <Background color="#dbe3ef" gap={18} size={1} />
       </ReactFlow>
+      {focusedNode ? <Phase2FocusOverlay node={focusedNode} onClose={() => setFocusedNodeId(null)} /> : null}
     </div>
   )
 }
