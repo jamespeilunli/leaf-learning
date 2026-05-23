@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def new_id() -> str:
@@ -17,7 +17,7 @@ def now_iso() -> str:
 
 NodeState = Literal["expanded", "grayed", "learned"]
 Phase = Literal["1", "2"]
-Resolution = Literal["intuitive", "technical"]
+Resolution = Literal["technical"]
 
 
 class Resource(BaseModel):
@@ -39,7 +39,6 @@ class GraphNode(BaseModel):
     why_interesting: str | None = None
     phase: Phase
     node_state: NodeState = "grayed"
-    intuition_score: float | None = None
     resource: Resource | None = None
     parent_id: str | None = None
     child_ids: list[str] = Field(default_factory=list)
@@ -61,7 +60,7 @@ class Session(BaseModel):
     id: str = Field(default_factory=new_id)
     created_at: str = Field(default_factory=now_iso)
     phase: Phase = "1"
-    resolution: Resolution | None = None
+    resolution: Resolution = "technical"
     root_topic: str
     selection_history: list[str] = Field(default_factory=list)
     current_phase1_node_id: str | None = None
@@ -69,3 +68,8 @@ class Session(BaseModel):
     known_topics: list[str] = Field(default_factory=list)
     nodes: dict[str, GraphNode] = Field(default_factory=dict)
     edges: list[GraphEdge] = Field(default_factory=list)
+
+    @field_validator("resolution", mode="before")
+    @classmethod
+    def force_technical_resolution(cls, value: object) -> Resolution:
+        return "technical"

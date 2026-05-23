@@ -3,7 +3,6 @@ import { useMemo } from 'react'
 import { useSessionStore } from '../store/useSessionStore'
 import { DeepDiveButton } from './DeepDiveButton'
 import { Phase1OptionCard } from './Phase1OptionCard'
-import { ResolutionPicker } from './ResolutionPicker'
 
 export function Phase1View() {
   const session = useSessionStore((state) => state.session)
@@ -107,10 +106,6 @@ export function Phase1View() {
                   ))}
             </div>
           </section>
-
-          <div className="mt-8 rounded-[24px] border border-[var(--line)] bg-white/80 p-4">
-            <ResolutionPicker compact />
-          </div>
         </div>
       </div>
     </main>

@@ -121,7 +121,7 @@ SUBJECT_FIXTURES: dict[str, Subject] = {
 
 GENERIC_CHILDREN = [
     ("Foundations", "core ideas and terminology", "It gives later details a stable frame."),
-    ("Mental Models", "intuitive explanations and analogies", "It makes the subject easier to reason about before adding precision."),
+    ("Mental Models", "conceptual explanations and analogies", "It makes the subject easier to reason about before adding precision."),
     ("Methods and Tools", "common techniques, workflows, and instruments", "It shows how the subject is practiced rather than only described."),
     ("Tradeoffs", "important choices, constraints, and failure modes", "It helps explain why experts disagree in realistic situations."),
     ("Case Studies", "concrete examples and applications", "It connects the topic to decisions and outcomes."),
@@ -135,7 +135,6 @@ DEEP_DIVE_FIXTURES: dict[str, dict[str, object]] = {
             "title": "Mock Deep Dive: Representation Learning",
             "description": "A test resource that walks from embeddings to latent spaces and shows how learned features support downstream prediction.",
         },
-        "intuition_score": 0.42,
         "prerequisites": [
             ("Vector Spaces", "A vector space lets embeddings be compared, combined, and transformed."),
             ("Loss Functions", "A loss function defines what kind of representation the model is rewarded for learning."),
@@ -148,7 +147,6 @@ DEEP_DIVE_FIXTURES: dict[str, dict[str, object]] = {
             "title": "Mock Deep Dive: Neural Network Optimization",
             "description": "A test resource covering gradients, learning-rate schedules, momentum, and why training can stall or diverge.",
         },
-        "intuition_score": 0.78,
         "prerequisites": [
             ("Derivatives", "Derivatives describe local change and are the basis for gradient-based updates."),
             ("Loss Functions", "The optimizer needs a scalar objective that says which parameter settings are better."),
@@ -161,7 +159,6 @@ DEEP_DIVE_FIXTURES: dict[str, dict[str, object]] = {
             "title": "Mock Deep Dive: Consensus Protocols",
             "description": "A test resource explaining leader election, replicated logs, quorums, and failure handling in Raft-like systems.",
         },
-        "intuition_score": 0.72,
         "prerequisites": [
             ("Quorums", "Quorums ensure that enough replicas overlap to preserve agreement."),
             ("Failure Models", "Failure models define which machine and network problems the protocol is expected to tolerate."),
@@ -174,7 +171,6 @@ DEEP_DIVE_FIXTURES: dict[str, dict[str, object]] = {
             "title": "Mock Deep Dive: Radiative Forcing",
             "description": "A test resource explaining Earth's energy budget, greenhouse gas absorption, aerosols, and forcing units.",
         },
-        "intuition_score": 0.56,
         "prerequisites": [
             ("Energy Balance", "Energy balance compares incoming solar radiation with outgoing infrared radiation."),
             ("Blackbody Radiation", "Blackbody radiation explains why temperature affects emitted infrared energy."),
@@ -187,7 +183,6 @@ DEEP_DIVE_FIXTURES: dict[str, dict[str, object]] = {
             "title": "Mock Deep Dive: Core Game Loops",
             "description": "A test resource analyzing action-reward cycles, pacing, feedback, and how loops support long-term engagement.",
         },
-        "intuition_score": 0.28,
         "prerequisites": [
             ("Feedback Loops", "Feedback loops connect player actions to visible consequences and future choices."),
             ("Player Motivation", "Player motivation explains why rewards and goals feel meaningful."),
@@ -241,8 +236,7 @@ async def generate_phase1_children(
     yield {"event": "stream_done", "data": {}}
 
 
-def _generic_deep_dive(node_label: str, resolution: str) -> dict[str, object]:
-    score = 0.32 if resolution == "intuitive" else 0.74
+def _generic_deep_dive(node_label: str) -> dict[str, object]:
     concepts = [
         ("Key Vocabulary", f"Key vocabulary defines the terms used by resources about {node_label}."),
         ("Worked Examples", f"Worked examples show how {node_label} appears in concrete situations."),
@@ -255,29 +249,22 @@ def _generic_deep_dive(node_label: str, resolution: str) -> dict[str, object]:
         "resource": {
             "url": f"https://example.com/mock/{_key(node_label).replace(' ', '-')}",
             "title": f"Mock Deep Dive: {node_label}",
-            "description": f"A deterministic test resource for {node_label} at the {resolution} level, including examples, assumptions, and follow-on prerequisites.",
+            "description": f"A deterministic technical test resource for {node_label}, including examples, assumptions, and follow-on prerequisites.",
         },
-        "intuition_score": score,
         "prerequisites": prerequisites,
     }
 
 
 async def expand_phase2_node(
-    node_label: str, resolution: str, known_topics: list[str], goal_label: str
+    node_label: str, known_topics: list[str], goal_label: str
 ) -> AsyncGenerator[dict, None]:
-    fixture = DEEP_DIVE_FIXTURES.get(_key(node_label)) or _generic_deep_dive(node_label, resolution)
-    score = float(fixture["intuition_score"])
-    if resolution == "intuitive":
-        score = min(score, 0.45)
-    elif resolution == "technical":
-        score = max(score, 0.68)
+    fixture = DEEP_DIVE_FIXTURES.get(_key(node_label)) or _generic_deep_dive(node_label)
 
     resource = Resource.model_validate(fixture["resource"])
     yield {
         "event": "node_updated",
         "data": {
             "resource": resource.model_dump(),
-            "intuition_score": score,
         },
     }
 
@@ -294,12 +281,11 @@ async def expand_phase2_node(
 
 
 async def explain_prerequisite(
-    node_label: str, parent_label: str, parent_description: str, resolution: str
+    node_label: str, parent_label: str, parent_description: str
 ) -> str:
-    style = "plain-language" if resolution == "intuitive" else "more precise"
     return (
         f"{node_label} is a prerequisite for {parent_label} because the mock resource uses it "
-        f"as part of its explanation. In a {style} view, it is the supporting idea that lets "
+        "as part of its technical explanation. It is the supporting idea that lets "
         f"the main topic make sense without skipping a hidden assumption. For testing, this "
         "text is deterministic and proves the explain-more flow works without calling OpenAI."
     )
@@ -309,13 +295,12 @@ async def chat_with_node(
     node_label: str,
     node_description: str,
     resource_description: str,
-    resolution: str,
     goal_path: list[str],
     history: list[ChatMessage],
     user_message: str,
 ) -> AsyncGenerator[str, None]:
     response = (
-        f"Mock tutor response for {node_label}: at the {resolution} level, focus on how this "
+        f"Mock tutor response for {node_label}: at the technical level, focus on how this "
         f"topic supports {' > '.join(goal_path)}. Your question was: {user_message.strip()} "
         "This confirms chat streaming works locally without an API key."
     )
