@@ -34,6 +34,7 @@ interface SessionStore {
   explainNode: (nodeId: string) => Promise<void>
   markLearned: (nodeId: string) => Promise<void>
   deleteNode: (nodeId: string) => Promise<void>
+  restartFlow: () => void
   openChat: (nodeId: string) => void
   closeChat: () => void
   _applyNodeAdded: (node: GraphNode) => void
@@ -306,6 +307,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     } catch (error) {
       set({ error: error instanceof Error ? error.message : 'Failed to delete node.' })
     }
+  },
+
+  restartFlow() {
+    localStorage.removeItem(SESSION_STORAGE_KEY)
+    set({
+      sessionId: null,
+      session: null,
+      isLoading: false,
+      streamingNodeIds: new Set<string>(),
+      explainingNodeIds: new Set<string>(),
+      chatOpenNodeId: null,
+      error: null,
+    })
   },
 
   openChat(nodeId) {
