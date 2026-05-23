@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-import type { Phase, Resolution, Session } from '../types'
+import type { Phase, Session } from '../types'
 
 const http = axios.create({
   baseURL: '/api',
@@ -37,14 +37,6 @@ export async function expandPhase1Topic(sessionId: string, nodeId: string): Prom
 
 export async function back(sessionId: string): Promise<Session> {
   const response = await http.post(`/session/${sessionId}/back`)
-  return response.data
-}
-
-export async function setResolution(
-  sessionId: string,
-  resolution: Resolution,
-): Promise<Session> {
-  const response = await http.post(`/session/${sessionId}/resolution`, { resolution })
   return response.data
 }
 

@@ -1,6 +1,5 @@
 export type NodeState = 'expanded' | 'grayed' | 'learned'
 export type Phase = '1' | '2'
-export type Resolution = 'intuitive' | 'technical'
 
 export interface Resource {
   url: string
@@ -21,7 +20,6 @@ export interface GraphNode {
   why_interesting: string | null
   phase: Phase
   node_state: NodeState
-  intuition_score: number | null
   resource: Resource | null
   parent_id: string | null
   child_ids: string[]
@@ -41,7 +39,7 @@ export interface Session {
   id: string
   created_at: string
   phase: Phase
-  resolution: Resolution | null
+  resolution: 'technical'
   root_topic: string
   selection_history: string[]
   current_phase1_node_id: string | null

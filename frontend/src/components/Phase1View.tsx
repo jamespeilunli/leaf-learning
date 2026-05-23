@@ -1,228 +1,353 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Network, Sparkles } from 'lucide-react'
-import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, useReactFlow } from 'reactflow'
-import type { Edge as RFEdge, Node as RFNode, NodeMouseHandler } from 'reactflow'
+import ForceGraph2D from 'react-force-graph-2d'
+import type { ForceGraphMethods } from 'react-force-graph-2d'
 
 import { useSessionStore } from '../store/useSessionStore'
 import type { GraphNode } from '../types'
 import { DeepDiveButton } from './DeepDiveButton'
-import { Phase1KnowledgeNode } from './Phase1KnowledgeNode'
-import { ResolutionPicker } from './ResolutionPicker'
 
-const nodeTypes = { phase1KnowledgeNode: Phase1KnowledgeNode }
-const NODE_WIDTH = 190
-const NODE_HEIGHT = 94
-
-function hashUnit(value: string) {
-  let hash = 2166136261
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-  return (hash >>> 0) / 4294967295
+type TopicNode = GraphNode & {
+  color: string
+  isExpanded: boolean
+  isNew?: boolean
+  isRoot: boolean
+  val: number
+  fx?: number
+  fy?: number
+  vx?: number
+  vy?: number
+  x?: number
+  y?: number
 }
 
-function layoutKnowledgeWeb(nodes: GraphNode[], edges: RFEdge[]) {
-  const ordered = [...nodes].sort((a, b) => a.depth - b.depth || a.label.localeCompare(b.label))
-  const childIndex = new Map<string, number>()
-  const childCount = new Map<string, number>()
+interface TopicLink {
+  source: string | TopicNode
+  target: string | TopicNode
+}
 
-  for (const node of ordered) {
-    if (!node.parent_id) continue
-    const count = childCount.get(node.parent_id) ?? 0
-    childIndex.set(node.id, count)
-    childCount.set(node.parent_id, count + 1)
-  }
+interface TopicGraphData {
+  links: TopicLink[]
+  nodes: TopicNode[]
+}
 
-  const points = new Map<string, { x: number; y: number; vx: number; vy: number; depth: number }>()
+interface GraphSize {
+  height: number
+  width: number
+}
 
-  for (const node of ordered) {
-    const parent = node.parent_id ? points.get(node.parent_id) : null
-    if (!parent) {
-      points.set(node.id, { x: 0, y: 0, vx: 0, vy: 0, depth: node.depth })
+const ROOT_COLOR = '#bf5b2c'
+const EXPANDED_COLOR = '#15803d'
+const READY_COLOR = '#0ea5e9'
+const SELECTED_COLOR = '#18212d'
+const ROOT_NODE_WIDTH = 188
+const ROOT_NODE_HEIGHT = 82
+const TOPIC_NODE_WIDTH = 168
+const TOPIC_NODE_HEIGHT = 72
+
+function getNodeColor(node: GraphNode, selectedNodeId: string | null) {
+  if (node.id === selectedNodeId) return SELECTED_COLOR
+  if (!node.parent_id) return ROOT_COLOR
+  if (node.child_ids.length) return EXPANDED_COLOR
+  return READY_COLOR
+}
+
+function getNodeEndpoint(endpoint: string | TopicNode) {
+  return typeof endpoint === 'string' ? endpoint : endpoint.id
+}
+
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  ctx.beginPath()
+  ctx.moveTo(x + radius, y)
+  ctx.lineTo(x + width - radius, y)
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius)
+  ctx.lineTo(x + width, y + height - radius)
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height)
+  ctx.lineTo(x + radius, y + height)
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius)
+  ctx.lineTo(x, y + radius)
+  ctx.quadraticCurveTo(x, y, x + radius, y)
+  ctx.closePath()
+}
+
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines = 3) {
+  const words = text.split(/\s+/)
+  const lines: string[] = []
+  let line = ''
+
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word
+    if (ctx.measureText(candidate).width <= maxWidth) {
+      line = candidate
       continue
     }
 
-    const siblings = Math.max(childCount.get(node.parent_id ?? '') ?? 1, 1)
-    const index = childIndex.get(node.id) ?? 0
-    const seed = hashUnit(node.id) - 0.5
-    const spread = Math.PI * 1.35
-    const baseAngle = -Math.PI / 2 + (index - (siblings - 1) / 2) * (spread / Math.max(siblings, 2))
-    const angle = baseAngle + seed * 0.42
-    const distance = 220 + node.depth * 24
-
-    points.set(node.id, {
-      x: parent.x + Math.cos(angle) * distance,
-      y: parent.y + Math.sin(angle) * distance + 150,
-      vx: 0,
-      vy: 0,
-      depth: node.depth,
-    })
+    if (line) lines.push(line)
+    line = word
+    if (lines.length === maxLines - 1) break
   }
 
-  const springEdges = edges
-    .map((edge) => ({ source: edge.source, target: edge.target }))
-    .filter((edge) => points.has(edge.source) && points.has(edge.target))
-
-  for (let tick = 0; tick < 180; tick += 1) {
-    const values = [...points.entries()]
-
-    for (let left = 0; left < values.length; left += 1) {
-      for (let right = left + 1; right < values.length; right += 1) {
-        const [, a] = values[left]
-        const [, b] = values[right]
-        const dx = b.x - a.x || 0.01
-        const dy = b.y - a.y || 0.01
-        const distanceSquared = Math.max(dx * dx + dy * dy, 900)
-        const force = 9000 / distanceSquared
-        const distance = Math.sqrt(distanceSquared)
-        const fx = (dx / distance) * force
-        const fy = (dy / distance) * force
-
-        a.vx -= fx
-        a.vy -= fy
-        b.vx += fx
-        b.vy += fy
-      }
+  if (line && lines.length < maxLines) lines.push(line)
+  if (words.length && lines.length === maxLines) {
+    const last = lines[maxLines - 1]
+    let trimmed = last
+    while (ctx.measureText(`${trimmed}...`).width > maxWidth && trimmed.length > 4) {
+      trimmed = trimmed.slice(0, -1)
     }
-
-    for (const edge of springEdges) {
-      const source = points.get(edge.source)
-      const target = points.get(edge.target)
-      if (!source || !target) continue
-
-      const dx = target.x - source.x || 0.01
-      const dy = target.y - source.y || 0.01
-      const distance = Math.sqrt(dx * dx + dy * dy)
-      const desired = 235 + Math.min(target.depth, 4) * 18
-      const force = (distance - desired) * 0.018
-      const fx = (dx / distance) * force
-      const fy = (dy / distance) * force
-
-      source.vx += fx
-      source.vy += fy
-      target.vx -= fx
-      target.vy -= fy
-    }
-
-    for (const [id, point] of points) {
-      const isRoot = nodes.find((node) => node.id === id)?.parent_id === null
-      const targetY = point.depth * 170
-      point.vy += (targetY - point.y) * 0.004
-      if (isRoot) {
-        point.vx += (0 - point.x) * 0.04
-        point.vy += (0 - point.y) * 0.04
-      }
-
-      point.vx *= 0.78
-      point.vy *= 0.78
-      point.x += point.vx
-      point.y += point.vy
-    }
+    lines[maxLines - 1] = `${trimmed}...`
   }
 
-  return points
+  return lines
 }
 
-interface KnowledgeWebProps {
-  edges: RFEdge[]
-  nodes: RFNode[]
-  onNodeClick: NodeMouseHandler
-  onPaneClick: () => void
+function drawTopicNode(
+  node: TopicNode,
+  ctx: CanvasRenderingContext2D,
+  globalScale: number,
+  selectedNodeId: string | null,
+) {
+  const x = node.x ?? 0
+  const y = node.y ?? 0
+  const width = node.isRoot ? ROOT_NODE_WIDTH : TOPIC_NODE_WIDTH
+  const height = node.isRoot ? ROOT_NODE_HEIGHT : TOPIC_NODE_HEIGHT
+  const radius = 8
+  const selected = node.id === selectedNodeId
+  const fontSize = Math.max(9, 13 / Math.sqrt(globalScale))
+  const labelLines = wrapText(ctx, node.label, width - 38, 3)
+
+  if (node.isNew) {
+    ctx.beginPath()
+    ctx.arc(x, y, Math.max(width, height) * 0.62, 0, Math.PI * 2)
+    ctx.fillStyle = 'rgba(14,165,233,0.11)'
+    ctx.fill()
+  }
+
+  roundRect(ctx, x - width / 2, y - height / 2, width, height, radius)
+  ctx.fillStyle = 'rgba(255,255,255,0.96)'
+  ctx.fill()
+  ctx.lineWidth = selected ? 3 : 1.5
+  ctx.strokeStyle = selected ? ROOT_COLOR : 'rgba(148,163,184,0.7)'
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.arc(x - width / 2 + 17, y - height / 2 + 18, 5.5, 0, Math.PI * 2)
+  ctx.fillStyle = node.color
+  ctx.fill()
+
+  ctx.fillStyle = '#18212d'
+  ctx.font = `600 ${fontSize}px Avenir Next, Segoe UI, sans-serif`
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'top'
+
+  labelLines.forEach((line, index) => {
+    ctx.fillText(line, x - width / 2 + 30, y - height / 2 + 12 + index * (fontSize + 3))
+  })
+
+  ctx.fillStyle = '#5d6773'
+  ctx.font = `500 ${Math.max(8, 10 / Math.sqrt(globalScale))}px Avenir Next, Segoe UI, sans-serif`
+  ctx.fillText(
+    node.isRoot ? 'Root topic' : node.isExpanded ? 'Expanded' : 'Ready to expand',
+    x - width / 2 + 30,
+    y + height / 2 - 20,
+  )
 }
 
-function KnowledgeWeb({ edges, nodes, onNodeClick, onPaneClick }: KnowledgeWebProps) {
-  const { fitView } = useReactFlow()
+function keepGraphInBounds(nodes: TopicNode[]) {
+  const maxRadius = Math.max(520, Math.sqrt(nodes.length) * 175)
+
+  for (const node of nodes) {
+    if (!Number.isFinite(node.x)) node.x = 0
+    if (!Number.isFinite(node.y)) node.y = 0
+
+    if (node.isRoot && node.fx === undefined && node.fy === undefined) {
+      node.vx = (node.vx ?? 0) + (0 - (node.x ?? 0)) * 0.012
+      node.vy = (node.vy ?? 0) + (0 - (node.y ?? 0)) * 0.012
+    }
+
+    const x = node.x ?? 0
+    const y = node.y ?? 0
+    const distance = Math.hypot(x, y)
+    if (distance <= maxRadius) continue
+
+    const excess = distance - maxRadius
+    node.vx = (node.vx ?? 0) - (x / distance) * excess * 0.045
+    node.vy = (node.vy ?? 0) - (y / distance) * excess * 0.045
+  }
+}
+
+function useGraphSize() {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [size, setSize] = useState<GraphSize>({ height: 620, width: 900 })
 
   useEffect(() => {
-    if (!nodes.length) return
-    window.requestAnimationFrame(() => {
-      void fitView({ duration: 350, padding: 0.22 })
-    })
-  }, [fitView, nodes.length])
+    const element = containerRef.current
+    if (!element) return
 
-  return (
-    <ReactFlow
-      defaultEdgeOptions={{ type: 'smoothstep' }}
-      edges={edges}
-      fitView
-      fitViewOptions={{ padding: 0.22 }}
-      nodes={nodes}
-      nodesDraggable
-      nodeTypes={nodeTypes}
-      onNodeClick={onNodeClick}
-      onPaneClick={onPaneClick}
-    >
-      <MiniMap maskColor="rgba(251,250,245,0.72)" nodeColor="#bf5b2c" pannable zoomable />
-      <Controls />
-      <Background color="#d8dee8" gap={22} size={1} />
-    </ReactFlow>
-  )
+    const observer = new ResizeObserver(([entry]) => {
+      setSize({
+        height: Math.max(420, entry.contentRect.height),
+        width: Math.max(320, entry.contentRect.width),
+      })
+    })
+    observer.observe(element)
+
+    return () => observer.disconnect()
+  }, [])
+
+  return { containerRef, size }
 }
 
 export function Phase1View() {
   const session = useSessionStore((state) => state.session)
   const isLoading = useSessionStore((state) => state.isLoading)
   const expandPhase1Topic = useSessionStore((state) => state.expandPhase1Topic)
+  const graphRef = useRef<ForceGraphMethods | null>(null)
+  const nodeCacheRef = useRef<Map<string, TopicNode>>(new Map())
+  const previousNodeIdsRef = useRef<Set<string>>(new Set())
+  const focusAfterExpandRef = useRef<string | null>(null)
+  const { containerRef, size } = useGraphSize()
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [expandingNodeId, setExpandingNodeId] = useState<string | null>(null)
+  const [newNodeIds, setNewNodeIds] = useState<Set<string>>(new Set())
+  const [graphData, setGraphData] = useState<TopicGraphData>({ links: [], nodes: [] })
 
   const phase1Nodes = useMemo(() => {
     if (!session) return []
     return Object.values(session.nodes).filter((node) => node.phase === '1')
   }, [session])
 
-  const graphEdges = useMemo<RFEdge[]>(() => {
-    const nodeIds = new Set(phase1Nodes.map((node) => node.id))
-    return phase1Nodes.flatMap((node) =>
-      node.child_ids
-        .filter((childId) => nodeIds.has(childId))
-        .map((childId) => ({
-          id: `${node.id}-${childId}`,
-          source: node.id,
-          target: childId,
-          type: 'smoothstep',
-          animated: true,
-          style: { stroke: '#94a3b8', strokeWidth: 1.6 },
-        })),
-    )
+  useEffect(() => {
+    const currentIds = new Set(phase1Nodes.map((node) => node.id))
+    const addedIds = [...currentIds].filter((id) => !previousNodeIdsRef.current.has(id))
+
+    previousNodeIdsRef.current = currentIds
+    if (!addedIds.length) return
+
+    setNewNodeIds(new Set(addedIds))
+    const timeout = window.setTimeout(() => setNewNodeIds(new Set()), 1400)
+    return () => window.clearTimeout(timeout)
   }, [phase1Nodes])
 
-  const graphNodes = useMemo<RFNode[]>(() => {
-    const positions = layoutKnowledgeWeb(phase1Nodes, graphEdges)
+  useEffect(() => {
+    const cache = nodeCacheRef.current
+    const currentIds = new Set(phase1Nodes.map((node) => node.id))
 
-    return phase1Nodes.map((node) => {
-      const point = positions.get(node.id) ?? { x: 0, y: 0 }
-      return {
-        id: node.id,
-        type: 'phase1KnowledgeNode',
-        position: { x: point.x - NODE_WIDTH / 2, y: point.y - NODE_HEIGHT / 2 },
-        selected: node.id === selectedNodeId,
-        data: {
-          node,
-          isRoot: node.parent_id === null,
-          isExpanded: node.child_ids.length > 0,
-        },
+    for (const id of cache.keys()) {
+      if (!currentIds.has(id)) cache.delete(id)
+    }
+
+    const nodes = phase1Nodes.map((node) => {
+      const cached = cache.get(node.id)
+      const parent = node.parent_id ? cache.get(node.parent_id) : null
+      const seededAngle = (node.depth + cache.size + 1) * 1.73
+      const topicNode: TopicNode = cached ?? {
+        ...node,
+        color: getNodeColor(node, selectedNodeId),
+        isExpanded: node.child_ids.length > 0,
+        isNew: newNodeIds.has(node.id),
+        isRoot: node.parent_id === null,
+        val: node.parent_id ? 10 : 14,
+        vx: Math.cos(seededAngle) * 1.4,
+        vy: Math.sin(seededAngle) * 1.4,
+        x: parent?.x !== undefined ? parent.x + Math.cos(seededAngle) * 34 : undefined,
+        y: parent?.y !== undefined ? parent.y + Math.sin(seededAngle) * 34 : undefined,
       }
+
+      Object.assign(topicNode, {
+        ...node,
+        color: getNodeColor(node, selectedNodeId),
+        isExpanded: node.child_ids.length > 0,
+        isNew: newNodeIds.has(node.id),
+        isRoot: node.parent_id === null,
+        val: node.parent_id ? 10 : 14,
+      })
+
+      cache.set(node.id, topicNode)
+      return topicNode
     })
-  }, [graphEdges, phase1Nodes, selectedNodeId])
+
+    const nodeIds = new Set(nodes.map((node) => node.id))
+    const links = phase1Nodes.flatMap((node) =>
+      node.child_ids
+        .filter((childId) => nodeIds.has(childId))
+        .map((childId) => ({ source: node.id, target: childId })),
+    )
+
+    setGraphData({ links, nodes })
+  }, [newNodeIds, phase1Nodes, selectedNodeId])
 
   const selectedNode = selectedNodeId && session ? session.nodes[selectedNodeId] : null
   const hasExpanded = Boolean(selectedNode?.child_ids.length)
 
-  const handleNodeClick: NodeMouseHandler = (_, node) => {
-    setSelectedNodeId(node.id)
-  }
+  useEffect(() => {
+    const graph = graphRef.current
+    if (!graph) return
+
+    const charge = graph.d3Force('charge') as { strength?: (strength: number) => void } | undefined
+    const link = graph.d3Force('link') as
+      | { distance?: (distance: number) => void; strength?: (strength: number) => void }
+      | undefined
+
+    charge?.strength?.(-620)
+    link?.distance?.(210)
+    link?.strength?.(0.05)
+    graph.d3ReheatSimulation()
+  }, [graphData.nodes.length])
+
+  useEffect(() => {
+    if (!graphRef.current || !graphData.nodes.length) return
+
+    const focusId = focusAfterExpandRef.current ?? selectedNodeId
+    const focusNode = focusId ? nodeCacheRef.current.get(focusId) : null
+
+    if (focusNode?.x !== undefined && focusNode.y !== undefined) {
+      graphRef.current.centerAt(focusNode.x, focusNode.y, 520)
+      graphRef.current.zoom(Math.max(0.42, Math.min(1.08, 1.42 - graphData.nodes.length * 0.035)), 520)
+      focusAfterExpandRef.current = null
+      return
+    }
+
+    if (phase1Nodes.length <= 7) {
+      window.setTimeout(() => graphRef.current?.zoomToFit(450, 80), 260)
+    }
+  }, [graphData.nodes.length, phase1Nodes.length, selectedNodeId])
+
+  useEffect(() => {
+    if (!newNodeIds.size) return
+
+    let frame = 0
+    let active = true
+    const redraw = () => {
+      if (!active) return
+      graphRef.current?.refresh()
+      frame += 1
+      if (frame < 84) window.requestAnimationFrame(redraw)
+    }
+    window.requestAnimationFrame(redraw)
+
+    return () => {
+      active = false
+    }
+  }, [newNodeIds])
 
   async function handleExpand() {
     if (!selectedNode || hasExpanded) return
 
     const nodeId = selectedNode.id
+    focusAfterExpandRef.current = nodeId
     setExpandingNodeId(nodeId)
     await expandPhase1Topic(nodeId)
     setSelectedNodeId(null)
     setExpandingNodeId(null)
+    graphRef.current?.d3ReheatSimulation()
   }
 
   if (!session) {
@@ -232,27 +357,58 @@ export function Phase1View() {
   return (
     <main className="h-screen overflow-hidden bg-[var(--bg)] text-[var(--ink)]">
       <div className="grid h-full min-h-0 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <section className="relative h-[62vh] min-h-[460px] overflow-hidden bg-[radial-gradient(circle_at_20%_18%,rgba(14,165,233,0.16),transparent_30%),radial-gradient(circle_at_80%_16%,rgba(191,91,44,0.14),transparent_28%),linear-gradient(180deg,#fbfaf5_0%,#eef2f6_100%)] lg:h-full">
+        <section
+          ref={containerRef}
+          className="relative h-[62vh] min-h-[460px] overflow-hidden bg-[radial-gradient(circle_at_20%_18%,rgba(14,165,233,0.16),transparent_30%),radial-gradient(circle_at_80%_16%,rgba(191,91,44,0.14),transparent_28%),linear-gradient(180deg,#fbfaf5_0%,#eef2f6_100%)] lg:h-full"
+        >
           <div className="pointer-events-none absolute left-5 top-5 z-10 flex items-center gap-3 rounded-[8px] border border-white/70 bg-white/80 px-4 py-3 shadow-[0_16px_42px_rgba(24,33,45,0.12)] backdrop-blur">
             <div className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-[var(--ink)] text-white">
               <Network size={18} />
             </div>
             <div>
               <p className="text-xs font-semibold uppercase text-[var(--muted)]">Web of Knowledge</p>
-              <h1 className="font-serif-display text-2xl leading-7">{session.root_topic}</h1>
+              <h1 className="max-w-[44vw] truncate font-serif-display text-2xl leading-7">
+                {session.root_topic}
+              </h1>
             </div>
           </div>
 
-          <div className="absolute inset-0">
-            <ReactFlowProvider>
-              <KnowledgeWeb
-                edges={graphEdges}
-                nodes={graphNodes}
-                onNodeClick={handleNodeClick}
-                onPaneClick={() => setSelectedNodeId(null)}
-              />
-            </ReactFlowProvider>
-          </div>
+          <ForceGraph2D
+            ref={graphRef}
+            autoPauseRedraw={false}
+            backgroundColor="rgba(0,0,0,0)"
+            cooldownTicks={Infinity}
+            enableNodeDrag
+            graphData={graphData}
+            height={size.height}
+            linkColor={() => 'rgba(100,116,139,0.52)'}
+            linkDirectionalParticles={(link) =>
+              newNodeIds.has(getNodeEndpoint((link as TopicLink).target)) ? 2 : 0
+            }
+            linkDirectionalParticleSpeed={0.006}
+            linkDirectionalParticleWidth={2}
+            linkWidth={() => 1.4}
+            maxZoom={2.2}
+            minZoom={0.24}
+            nodeCanvasObject={(node, ctx, globalScale) =>
+              drawTopicNode(node as TopicNode, ctx, globalScale, selectedNodeId)
+            }
+            nodePointerAreaPaint={(node, color, ctx) => {
+              const topicNode = node as TopicNode
+              const width = topicNode.isRoot ? ROOT_NODE_WIDTH : TOPIC_NODE_WIDTH
+              const height = topicNode.isRoot ? ROOT_NODE_HEIGHT : TOPIC_NODE_HEIGHT
+              ctx.fillStyle = color
+              ctx.fillRect((topicNode.x ?? 0) - width / 2, (topicNode.y ?? 0) - height / 2, width, height)
+            }}
+            onEngineTick={() => keepGraphInBounds(graphData.nodes)}
+            onNodeClick={(node) => setSelectedNodeId((node as TopicNode).id)}
+            onNodeDragEnd={(node) => {
+              const topicNode = node as TopicNode
+              topicNode.fx = topicNode.x
+              topicNode.fy = topicNode.y
+            }}
+            width={size.width}
+          />
         </section>
 
         <aside className="flex min-h-0 flex-col border-l border-[var(--line)] bg-[var(--paper)]">
@@ -323,7 +479,7 @@ export function Phase1View() {
                     <div className="mt-1 text-xs font-medium text-[var(--muted)]">Topics mapped</div>
                   </div>
                   <div className="rounded-[8px] border border-[var(--line)] bg-white p-4">
-                    <div className="text-2xl font-semibold">{graphEdges.length}</div>
+                    <div className="text-2xl font-semibold">{graphData.links.length}</div>
                     <div className="mt-1 text-xs font-medium text-[var(--muted)]">Connections</div>
                   </div>
                 </div>
@@ -335,10 +491,6 @@ export function Phase1View() {
                 ) : null}
               </div>
             )}
-          </div>
-
-          <div className="border-t border-[var(--line)] p-5">
-            <ResolutionPicker compact />
           </div>
         </aside>
       </div>

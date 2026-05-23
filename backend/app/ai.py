@@ -15,16 +15,26 @@ API_KEY_PLACEHOLDER = "sk-your-key-here"
 _client: AsyncOpenAI | None = None
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def using_mock_ai() -> bool:
-    mode = os.getenv("ALPHAG3N_AI_MODE", "").strip().lower()
-    if mode == "openai":
-        return False
-    return True
+    return not _env_flag("ALPHAG3N_USE_OPENAI", default=False)
 
 
 def get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not api_key or api_key == API_KEY_PLACEHOLDER:
+            raise RuntimeError(
+                "OpenAI usage is enabled, but OPENAI_API_KEY is missing or still set "
+                "to the placeholder value."
+            )
         _client = AsyncOpenAI()
     return _client
 
@@ -108,12 +118,11 @@ Do not repeat or rephrase topics already in the selection path.
 
 
 async def expand_phase2_node(
-    node_label: str, resolution: str, known_topics: list[str], goal_label: str
+    node_label: str, known_topics: list[str], goal_label: str
 ) -> AsyncGenerator[dict, None]:
     if using_mock_ai():
         async for event in mock_ai.expand_phase2_node(
             node_label,
-            resolution,
             known_topics,
             goal_label,
         ):
@@ -122,10 +131,9 @@ async def expand_phase2_node(
 
     instructions = f"""
 You are a learning roadmap assistant. The user's goal is to understand "{goal_label}".
-They prefer a {resolution} level of understanding
-(intuitive = conceptual/metaphorical, technical = formal/precise/equation-level).
+Explain topics at a technical level with formal, precise, mechanism-focused detail.
 
-Search for and read the best resource that genuinely explains "{node_label}" at this level.
+Search for and read the best resource that genuinely explains "{node_label}" at this technical level.
 The resource must explain the topic in depth, not just introduce it.
 
 Return ONLY a JSON object with this exact shape:
@@ -135,7 +143,6 @@ Return ONLY a JSON object with this exact shape:
     "title": "string",
     "description": "string (1–2 sentences on exactly what this resource covers and why it's the right one)"
   }},
-  "intuition_score": 0.0,
   "prerequisites": [
     {{
       "label": "string",
@@ -144,7 +151,6 @@ Return ONLY a JSON object with this exact shape:
   ]
 }}
 
-intuition_score must be a float from 0.0 (purely conceptual) to 1.0 (highly technical/formal).
 prerequisites must be topics directly used or assumed by the resource — not general background.
 Do NOT include any of these topics as prerequisites, the user already knows them: {known_topics}
 Return ONLY the JSON object. No prose, no markdown fences.
@@ -164,7 +170,6 @@ Return ONLY the JSON object. No prose, no markdown fences.
             "event": "node_updated",
             "data": {
                 "resource": resource.model_dump(),
-                "intuition_score": float(payload["intuition_score"]),
             },
         }
 
@@ -185,14 +190,13 @@ Return ONLY the JSON object. No prose, no markdown fences.
 
 
 async def explain_prerequisite(
-    node_label: str, parent_label: str, parent_description: str, resolution: str
+    node_label: str, parent_label: str, parent_description: str
 ) -> str:
     if using_mock_ai():
         return await mock_ai.explain_prerequisite(
             node_label,
             parent_label,
             parent_description,
-            resolution,
         )
 
     instructions = f"""
@@ -201,7 +205,7 @@ The user is studying "{parent_label}" ({parent_description}).
 They encountered a prerequisite called "{node_label}" and want to understand what it is
 before deciding whether they already know it.
 Explain what "{node_label}" is and why it appears as a prerequisite for understanding
-"{parent_label}". Use a {resolution} explanation style.
+"{parent_label}". Use a technical explanation style with precise mechanisms and terminology.
 Write 3 to 5 sentences. Do not assume they know the term — explain it plainly.
 """.strip()
 
@@ -217,7 +221,6 @@ async def chat_with_node(
     node_label: str,
     node_description: str,
     resource_description: str,
-    resolution: str,
     goal_path: list[str],
     history: list[ChatMessage],
     user_message: str,
@@ -227,7 +230,6 @@ async def chat_with_node(
             node_label,
             node_description,
             resource_description,
-            resolution,
             goal_path,
             history,
             user_message,
@@ -240,11 +242,11 @@ async def chat_with_node(
 You are a focused tutor helping the user understand "{node_label}".
 Their overall learning goal is: {goal_path[0]}
 They reached this topic via: {" → ".join(goal_path)}
-Their preferred depth: {resolution} (intuitive = conceptual, technical = formal/precise)
+Preferred depth: technical, formal, and precise.
 About this topic: {node_description}
 The primary resource covers: {resource_description}
 
-Answer questions about this specific topic at the {resolution} level.
+Answer questions about this specific topic at a technical level.
 Be concise. Stay on topic.
 """.strip()
 
