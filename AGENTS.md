@@ -1,0 +1,4 @@
+- Use `uv` for python related
+- Never run `npm run dev`, `uv run uvicorn`, `./run-dev.sh` or other commands, let the programmer run and test code
+- Write unit tests for each new distinct feature or function in both frontend and backend
+- Prioritize modularity

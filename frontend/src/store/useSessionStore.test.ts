@@ -1,0 +1,195 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import * as api from '../lib/api'
+import { streamSSE } from '../hooks/useSSE'
+import { SESSION_STORAGE_KEY, useSessionStore } from './useSessionStore'
+import { makeNode, makePhase2Session, makeSession } from '../test/fixtures'
+import { resetSessionStore } from '../test/storeTestUtils'
+import type { GraphEdge, Session } from '../types'
+
+vi.mock('../lib/api')
+vi.mock('../hooks/useSSE', () => ({
+  streamSSE: vi.fn(),
+}))
+
+const mockedApi = vi.mocked(api)
+const mockedStreamSSE = vi.mocked(streamSSE)
+
+function getState() {
+  return useSessionStore.getState()
+}
+
+describe('useSessionStore', () => {
+  beforeEach(() => {
+    resetSessionStore()
+    vi.clearAllMocks()
+  })
+
+  it('creates and persists a new session id', async () => {
+    const session = makeSession()
+    mockedApi.createSession.mockResolvedValue({ session_id: 'session-1', session })
+
+    await getState().initSession('machine learning')
+
+    expect(mockedApi.createSession).toHaveBeenCalledWith('machine learning')
+    expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBe('session-1')
+    expect(getState().session).toBe(session)
+    expect(getState().isLoading).toBe(false)
+  })
+
+  it('loads sessions and clears stale ids on failure', async () => {
+    const session = makeSession()
+    mockedApi.getSession.mockResolvedValueOnce(session)
+
+    await getState().loadSession('session-1')
+
+    expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBe('session-1')
+    expect(getState().sessionId).toBe('session-1')
+
+    mockedApi.getSession.mockRejectedValueOnce(new Error('missing'))
+    await expect(getState().loadSession('missing')).rejects.toThrow('missing')
+    expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
+    expect(getState().session).toBeNull()
+  })
+
+  it('runs phase 1 navigation and resolution mutations through the API', async () => {
+    useSessionStore.setState({ sessionId: 'session-1', session: makeSession() })
+    const selected = makeSession({ current_phase1_node_id: 'child-a', selection_history: ['root'] })
+    const backed = makeSession()
+    const resolved = makeSession({ resolution: 'technical' })
+    mockedApi.selectTopic.mockResolvedValue(selected)
+    mockedApi.back.mockResolvedValue(backed)
+    mockedApi.setResolution.mockResolvedValue(resolved)
+
+    await getState().selectTopic('child-a')
+    expect(getState().session).toBe(selected)
+
+    await getState().back()
+    expect(getState().session).toBe(backed)
+
+    await getState().setResolution('technical')
+    expect(mockedApi.setResolution).toHaveBeenCalledWith('session-1', 'technical')
+    expect(getState().session).toBe(resolved)
+  })
+
+  it('starts deep dive and expands the focus node', async () => {
+    useSessionStore.setState({ sessionId: 'session-1', session: makeSession() })
+    const phase2 = makePhase2Session()
+    mockedApi.deepDive.mockResolvedValue({ session: phase2 })
+    mockedStreamSSE.mockImplementation(async function* () {})
+
+    await getState().deepDive('goal')
+    await getState().expandNode('goal')
+
+    expect(mockedApi.deepDive).toHaveBeenCalledWith('session-1', 'goal')
+    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/goal/expand', {})
+    expect(getState().streamingNodeIds.size).toBe(0)
+  })
+
+  it('applies streamed phase 2 node updates, child additions, and edges', async () => {
+    const session = makePhase2Session({
+      nodes: {
+        goal: makeNode({
+          id: 'goal',
+          label: 'Representation Learning',
+          phase: '2',
+          node_state: 'grayed',
+          child_ids: [],
+        }),
+      },
+      edges: [],
+    })
+    const child = makeNode({
+      id: 'vector',
+      label: 'Vector Spaces',
+      phase: '2',
+      node_state: 'grayed',
+      parent_id: 'goal',
+    })
+    const edge: GraphEdge = { id: 'edge-vector', from: 'goal', to: 'vector', label: 'requires' }
+    useSessionStore.setState({ sessionId: 'session-1', session })
+    mockedStreamSSE.mockImplementation(async function* () {
+      yield {
+        event: 'node_updated',
+        data: {
+          id: 'goal',
+          resource: {
+            url: 'https://example.com',
+            title: 'Resource',
+            description: 'Resource description.',
+          },
+          intuition_score: 0.4,
+        },
+      }
+      yield { event: 'node_added', data: child }
+      yield { event: 'edge_added', data: edge }
+    })
+
+    await getState().expandNode('goal')
+
+    const updated = getState().session as Session
+    expect(updated.nodes.goal.node_state).toBe('expanded')
+    expect(updated.nodes.goal.resource?.title).toBe('Resource')
+    expect(updated.nodes.goal.intuition_score).toBe(0.4)
+    expect(updated.nodes.goal.child_ids).toContain('vector')
+    expect(updated.edges).toContainEqual(edge)
+  })
+
+  it('explains grayed nodes, marks learned duplicates, and prunes subtrees', async () => {
+    const session = makePhase2Session()
+    useSessionStore.setState({ sessionId: 'session-1', session })
+    mockedApi.explainNode.mockResolvedValue({ explain_more_text: 'Vector spaces explanation.' })
+    mockedApi.updateNodeState.mockImplementation(async () => useSessionStore.getState().session as Session)
+    mockedApi.deleteNode.mockResolvedValue({ removed_node_ids: ['prereq'] })
+
+    await getState().explainNode('prereq')
+    expect((getState().session as Session).nodes.prereq.explain_more_text).toBe('Vector spaces explanation.')
+
+    await getState().markLearned('prereq')
+    const learned = getState().session as Session
+    expect(learned.known_topics).toContain('vector spaces')
+    expect(learned.nodes.prereq.node_state).toBe('learned')
+    expect(learned.nodes.duplicate.explain_more_text).toBe('__known__')
+
+    await getState().deleteNode('prereq')
+    const pruned = getState().session as Session
+    expect(pruned.nodes.prereq).toBeUndefined()
+    expect(pruned.edges.some((edge) => edge.to === 'prereq')).toBe(false)
+  })
+
+  it('manages chat visibility and back-to-start restart state', () => {
+    useSessionStore.setState({
+      sessionId: 'session-1',
+      session: makePhase2Session(),
+      streamingNodeIds: new Set(['goal']),
+      explainingNodeIds: new Set(['prereq']),
+    })
+    localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
+
+    getState().openChat('goal')
+    expect(getState().chatOpenNodeId).toBe('goal')
+
+    getState().closeChat()
+    expect(getState().chatOpenNodeId).toBeNull()
+
+    getState().restartFlow()
+    expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
+    expect(getState().session).toBeNull()
+    expect(getState().streamingNodeIds.size).toBe(0)
+    expect(getState().explainingNodeIds.size).toBe(0)
+  })
+
+  it('stores API and stream failures as user-visible errors', async () => {
+    useSessionStore.setState({ sessionId: 'session-1', session: makePhase2Session() })
+    mockedApi.selectTopic.mockRejectedValue(new Error('select failed'))
+    mockedStreamSSE.mockImplementation(async function* () {
+      yield { event: 'stream_error', data: { message: 'expand failed' } }
+    })
+
+    await getState().selectTopic('missing')
+    expect(getState().error).toBe('select failed')
+
+    await getState().expandNode('prereq')
+    expect(getState().error).toBe('expand failed')
+  })
+})

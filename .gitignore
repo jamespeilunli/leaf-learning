@@ -9,6 +9,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.coverage
+htmlcov/
 .venv/
 venv/
 backend/sessions/
@@ -17,6 +19,7 @@ backend/sessions/
 node_modules/
 dist/
 dist-ssr/
+coverage/
 *.local
 
 # Logs
