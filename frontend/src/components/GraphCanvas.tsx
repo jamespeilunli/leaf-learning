@@ -1,8 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type ELKConstructor from 'elkjs/lib/elk.bundled.js'
 
 import { ArrowLeft } from 'lucide-react'
-import ReactFlow, { Background, Controls, MarkerType, MiniMap } from 'reactflow'
+import ReactFlow, {
+  Background,
+  Controls,
+  MarkerType,
+  MiniMap,
+  getNodesBounds,
+  getViewportForBounds,
+  useReactFlow,
+} from 'reactflow'
 import type { Edge as RFEdge, Node as RFNode } from 'reactflow'
 
 import { useSessionStore } from '../store/useSessionStore'
@@ -14,6 +22,7 @@ const nodeTypes = { phase2Node: Phase2Node, grayedNode: GrayedNode }
 const ACTIVE_NODE = { width: 320, height: 188 }
 const GRAYED_NODE = { width: 236, height: 132 }
 type ElkInstance = InstanceType<typeof ELKConstructor>
+type Point = { x: number; y: number }
 
 let elkPromise: Promise<ElkInstance> | null = null
 
@@ -24,6 +33,15 @@ async function getElk(): Promise<ElkInstance> {
 
 function sizeForNode(node: AppGraphNode) {
   return node.node_state === 'grayed' ? GRAYED_NODE : ACTIVE_NODE
+}
+
+function centerForNode(node: RFNode): Point {
+  const roadmapNode = node.data.node as AppGraphNode
+  const size = sizeForNode(roadmapNode)
+  return {
+    x: node.position.x + size.width / 2,
+    y: node.position.y + size.height / 2,
+  }
 }
 
 async function layoutTree(nodes: AppGraphNode[], edges: RFEdge[]): Promise<RFNode[]> {
@@ -70,6 +88,10 @@ async function layoutTree(nodes: AppGraphNode[], edges: RFEdge[]): Promise<RFNod
 export function GraphCanvas() {
   const session = useSessionStore((state) => state.session)
   const restartFlow = useSessionStore((state) => state.restartFlow)
+  const reactFlow = useReactFlow()
+  const paneRef = useRef<HTMLDivElement | null>(null)
+  const didInitialFit = useRef(false)
+  const rootAnchorRef = useRef<Point | null>(null)
   const [rfNodes, setRfNodes] = useState<RFNode[]>([])
 
   const graphNodes = useMemo(() => {
@@ -85,14 +107,9 @@ export function GraphCanvas() {
       id: edge.id,
       source: edge.to,
       target: edge.from,
-      label: 'supports',
       type: 'smoothstep',
       markerEnd: { type: MarkerType.ArrowClosed, color: '#334155', width: 18, height: 18 },
       style: { strokeWidth: 1.6, stroke: '#334155' },
-      labelBgPadding: [8, 4],
-      labelBgBorderRadius: 999,
-      labelBgStyle: { fill: '#f8fafc', fillOpacity: 0.92 },
-      labelStyle: { fill: '#475569', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' },
     }))
   }, [session])
 
@@ -106,11 +123,46 @@ export function GraphCanvas() {
     }
   }, [graphNodes, rfEdges])
 
+  useEffect(() => {
+    if (didInitialFit.current || !rfNodes.length) return
+    const bounds = paneRef.current?.getBoundingClientRect()
+    const width = bounds?.width ?? window.innerWidth
+    const height = bounds?.height ?? window.innerHeight
+    const viewport = getViewportForBounds(getNodesBounds(rfNodes), width, height, 0.18, 1.2, 0.22)
+    reactFlow.setViewport(viewport)
+    didInitialFit.current = true
+  }, [reactFlow, rfNodes])
+
+  useEffect(() => {
+    if (!session?.focus_node_id || !rfNodes.length) return
+
+    const rootNode = rfNodes.find((node) => node.id === session.focus_node_id)
+    if (!rootNode) return
+
+    const nextRootCenter = centerForNode(rootNode)
+    const previousRootCenter = rootAnchorRef.current
+    rootAnchorRef.current = nextRootCenter
+
+    if (!didInitialFit.current || !previousRootCenter) return
+
+    const viewport = reactFlow.getViewport()
+    const deltaX = previousRootCenter.x - nextRootCenter.x
+    const deltaY = previousRootCenter.y - nextRootCenter.y
+
+    if (Math.abs(deltaX) < 0.5 && Math.abs(deltaY) < 0.5) return
+
+    reactFlow.setViewport({
+      ...viewport,
+      x: viewport.x + deltaX * viewport.zoom,
+      y: viewport.y + deltaY * viewport.zoom,
+    })
+  }, [reactFlow, rfNodes, session?.focus_node_id])
+
   if (!session) return null
   const focusNode = session.focus_node_id ? session.nodes[session.focus_node_id] : null
 
   return (
-    <div className="h-screen w-full bg-[#eef1ec]">
+    <div ref={paneRef} className="h-screen w-full bg-[#eef1ec]">
       <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(24,33,45,0.045)_1px,transparent_1px),linear-gradient(180deg,rgba(24,33,45,0.045)_1px,transparent_1px)] bg-[size:34px_34px]" />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_100%,rgba(191,91,44,0.18),transparent_34%),radial-gradient(circle_at_15%_10%,rgba(14,165,233,0.14),transparent_28%)]" />
       <div className="pointer-events-none absolute inset-x-0 top-4 z-10 flex items-start justify-between gap-4 px-4">
@@ -131,8 +183,6 @@ export function GraphCanvas() {
         </div>
       </div>
       <ReactFlow
-        fitView
-        fitViewOptions={{ padding: 0.22 }}
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}

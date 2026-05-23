@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 
 import axios from 'axios'
+import { ReactFlowProvider } from 'reactflow'
 
 import { GraphCanvas } from './components/GraphCanvas'
 import { Phase1View } from './components/Phase1View'
@@ -34,8 +35,10 @@ function App() {
 
   return (
     <main className="relative h-screen w-full overflow-hidden">
-      <GraphCanvas />
-      <Phase2Sidebar />
+      <ReactFlowProvider>
+        <GraphCanvas />
+        <Phase2Sidebar />
+      </ReactFlowProvider>
     </main>
   )
 }
