@@ -11,12 +11,14 @@ export function Phase2Node({ data }: NodeProps<{ node: GraphNode }>) {
   const openNodeDetails = useSessionStore((state) => state.openNodeDetails)
   const isStreaming = streamingNodeIds.has(node.id)
   const sources = node.sources?.length ? node.sources : node.resource ? [node.resource] : []
+  const visibleSources = sources.slice(0, 2)
+  const hiddenSourceCount = Math.max(0, sources.length - visibleSources.length)
   const isLearned = node.node_state === 'learned'
 
   return (
     <button
       className={[
-        'group relative h-[188px] w-[320px] rounded-[8px] border p-4 text-left shadow-[0_18px_42px_rgba(15,23,42,0.16)] transition',
+        'group relative h-[188px] w-[320px] overflow-hidden rounded-[8px] border p-4 text-left shadow-[0_18px_42px_rgba(15,23,42,0.16)] transition',
         'before:absolute before:inset-x-4 before:top-0 before:h-[3px] before:rounded-b-full before:content-[""]',
         isLearned
           ? 'border-emerald-300 bg-[linear-gradient(180deg,#f3fff8_0%,#dff8ea_100%)] before:bg-emerald-500 hover:border-emerald-500'
@@ -26,7 +28,7 @@ export function Phase2Node({ data }: NodeProps<{ node: GraphNode }>) {
       onClick={() => openNodeDetails(node.id)}
     >
       <Handle position={Position.Top} style={{ opacity: 0 }} type="target" />
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="line-clamp-2 text-[17px] font-bold leading-6 text-[var(--ink)]">{node.label}</div>
           <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted-strong)]">
@@ -46,20 +48,27 @@ export function Phase2Node({ data }: NodeProps<{ node: GraphNode }>) {
         <p className="mt-3 line-clamp-3 text-[13px] leading-5 text-[var(--muted)]">{node.description}</p>
       ) : null}
 
-      <div className="mt-4 border-t border-dashed border-slate-300 pt-3">
+      <div className="mt-4 min-w-0 overflow-hidden border-t border-dashed border-slate-300 pt-3">
         {sources.length ? (
-          <div className="space-y-1.5">
-            {sources.slice(0, 2).map((source) => (
-              <div key={source.url} className="truncate text-[12px] font-semibold text-slate-700">
-                {source.title}
-              </div>
+          <ul className="min-w-0 space-y-1.5 overflow-hidden">
+            {visibleSources.map((source) => (
+              <li
+                key={source.url}
+                className="flex min-w-0 items-center gap-2 text-[12px] font-semibold text-slate-700"
+                title={source.title}
+              >
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" />
+                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                  {source.title}
+                </span>
+              </li>
             ))}
-            {sources.length > 2 ? (
-              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-strong)]">
-                +{sources.length - 2} more sources
-              </div>
+            {hiddenSourceCount ? (
+              <li className="pl-3.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-strong)]">
+                +{hiddenSourceCount} more
+              </li>
             ) : null}
-          </div>
+          </ul>
         ) : (
           <div className="space-y-2">
             <div className="h-3 w-4/5 animate-pulse rounded bg-slate-200" />
