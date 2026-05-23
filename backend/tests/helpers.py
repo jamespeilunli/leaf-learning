@@ -1,0 +1,51 @@
+from __future__ import annotations
+
+import json
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from fastapi.testclient import TestClient
+
+from app import storage
+from app.main import app
+
+
+@contextmanager
+def isolated_sessions_dir() -> Iterator[Path]:
+    with TemporaryDirectory() as directory:
+        previous = storage.SESSIONS_DIR
+        storage.SESSIONS_DIR = Path(directory)
+        storage.ensure_sessions_dir()
+        try:
+            yield storage.SESSIONS_DIR
+        finally:
+            storage.SESSIONS_DIR = previous
+
+
+def test_client() -> TestClient:
+    return TestClient(app)
+
+
+def parse_sse(text: str) -> list[tuple[str, object]]:
+    events: list[tuple[str, object]] = []
+    current_event = "message"
+
+    for block in text.strip().split("\n\n"):
+        if not block:
+            continue
+        data: object = None
+        for line in block.splitlines():
+            if line.startswith("event: "):
+                current_event = line[7:].strip()
+            elif line.startswith("data: "):
+                raw = line[6:]
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError:
+                    data = raw
+        events.append((current_event, data))
+        current_event = "message"
+
+    return events
