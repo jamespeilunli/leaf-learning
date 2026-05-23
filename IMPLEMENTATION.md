@@ -38,7 +38,6 @@ Read DESIGN.md first. This document specifies every file, API contract, data str
 │   │   │   ├── Phase2Node.tsx
 │   │   │   ├── GrayedNode.tsx
 │   │   │   ├── NodeChatPanel.tsx
-│   │   │   ├── ResolutionPicker.tsx
 │   │   │   └── DeepDiveButton.tsx
 │   │   ├── store/
 │   │   │   └── useSessionStore.ts
@@ -100,7 +99,7 @@ def now_iso() -> str:
 
 NodeState = Literal["expanded", "grayed", "learned"]
 Phase = Literal["1", "2"]
-Resolution = Literal["intuitive", "technical"]
+Resolution = Literal["technical"]
 
 
 class Resource(BaseModel):
@@ -122,7 +121,6 @@ class GraphNode(BaseModel):
     why_interesting: str | None = None   # Phase 1 only
     phase: Phase
     node_state: NodeState = "grayed"
-    intuition_score: float | None = None
     resource: Resource | None = None
     parent_id: str | None = None
     child_ids: list[str] = Field(default_factory=list)
@@ -144,7 +142,7 @@ class Session(BaseModel):
     id: str = Field(default_factory=new_id)
     created_at: str = Field(default_factory=now_iso)
     phase: Phase = "1"
-    resolution: Resolution | None = None
+    resolution: Resolution = "technical"
     root_topic: str
     selection_history: list[str] = Field(default_factory=list)  # stack of node IDs
     current_phase1_node_id: str | None = None
@@ -249,7 +247,7 @@ On any exception, yield `{"event": "stream_error", "data": {"message": str(e)}}`
 
 ---
 
-#### `expand_phase2_node(node_label: str, resolution: str, known_topics: list[str], goal_label: str) -> AsyncGenerator[dict, None]`
+#### `expand_phase2_node(node_label: str, known_topics: list[str], goal_label: str) -> AsyncGenerator[dict, None]`
 
 Uses `web_search_preview` tool:
 ```python
@@ -259,10 +257,9 @@ tools=[{"type": "web_search_preview"}]
 System prompt:
 ```
 You are a learning roadmap assistant. The user's goal is to understand "{goal_label}".
-They prefer a {resolution} level of understanding
-(intuitive = conceptual/metaphorical, technical = formal/precise/equation-level).
+Explain topics at a technical level with formal, precise, mechanism-focused detail.
 
-Search for and read the best resource that genuinely explains "{node_label}" at this level.
+Search for and read the best resource that genuinely explains "{node_label}" at this technical level.
 The resource must explain the topic in depth, not just introduce it.
 
 Return ONLY a JSON object with this exact shape:
@@ -272,7 +269,6 @@ Return ONLY a JSON object with this exact shape:
     "title": "string",
     "description": "string (1–2 sentences on exactly what this resource covers and why it's the right one)"
   },
-  "intuition_score": 0.0,
   "prerequisites": [
     {
       "label": "string",
@@ -281,21 +277,20 @@ Return ONLY a JSON object with this exact shape:
   ]
 }
 
-intuition_score must be a float from 0.0 (purely conceptual) to 1.0 (highly technical/formal).
 prerequisites must be topics directly used or assumed by the resource — not general background.
 Do NOT include any of these topics as prerequisites, the user already knows them: {known_topics}
 Return ONLY the JSON object. No prose, no markdown fences.
 ```
 
 Parse the response. Yield:
-1. `{"event": "node_updated", "data": {"resource": resource_dict, "intuition_score": float}}` — updates the current node with its resource and score.
+1. `{"event": "node_updated", "data": {"resource": resource_dict}}` — updates the current node with its resource.
 2. For each prerequisite: create a `GraphNode` with `phase="2"`, `node_state="grayed"`, `description=hint`. Yield `{"event": "node_added", "data": node_dict}`.
 3. For each prerequisite node: create a `GraphEdge` from the current node to the prerequisite. Yield `{"event": "edge_added", "data": edge_dict}`.
 4. `{"event": "stream_done", "data": {}}`.
 
 ---
 
-#### `explain_prerequisite(node_label: str, parent_label: str, parent_description: str, resolution: str) -> str`
+#### `explain_prerequisite(node_label: str, parent_label: str, parent_description: str) -> str`
 
 Not a generator. Returns a plain string. No tools.
 
@@ -306,7 +301,7 @@ The user is studying "{parent_label}" ({parent_description}).
 They encountered a prerequisite called "{node_label}" and want to understand what it is
 before deciding whether they already know it.
 Explain what "{node_label}" is and why it appears as a prerequisite for understanding
-"{parent_label}". Use a {resolution} explanation style.
+"{parent_label}". Use a technical explanation style with precise mechanisms and terminology.
 Write 3 to 5 sentences. Do not assume they know the term — explain it plainly.
 ```
 
@@ -314,7 +309,7 @@ Call `client.responses.create(...)` without streaming, return `response.output_t
 
 ---
 
-#### `chat_with_node(node_label: str, node_description: str, resource_description: str, resolution: str, goal_path: list[str], history: list[ChatMessage], user_message: str) -> AsyncGenerator[str, None]`
+#### `chat_with_node(node_label: str, node_description: str, resource_description: str, goal_path: list[str], history: list[ChatMessage], user_message: str) -> AsyncGenerator[str, None]`
 
 Streaming. No tools.
 
@@ -323,11 +318,11 @@ System prompt:
 You are a focused tutor helping the user understand "{node_label}".
 Their overall learning goal is: {goal_path[0]}
 They reached this topic via: {" → ".join(goal_path)}
-Their preferred depth: {resolution} (intuitive = conceptual, technical = formal/precise)
+Preferred depth: technical, formal, and precise.
 About this topic: {node_description}
 The primary resource covers: {resource_description}
 
-Answer questions about this specific topic at the {resolution} level.
+Answer questions about this specific topic at a technical level.
 Be concise. Stay on topic.
 ```
 
@@ -408,14 +403,6 @@ Note: this does not delete the child nodes that were generated — they remain i
 
 ---
 
-#### `POST /session/{session_id}/resolution`
-
-Request body: `{ "resolution": "intuitive" | "technical" }`
-
-Update `session.resolution`, save, return updated session.
-
----
-
 #### `POST /session/{session_id}/deep-dive`
 
 Request body: `{ "node_id": string }`
@@ -443,8 +430,8 @@ Handles both Phase 1 (if somehow called) and Phase 2 expansion. In practice this
 3. Set the node's `node_state = "expanded"` in memory (the resource will arrive via `node_updated`).
 4. Build `goal_label` = label of `session.nodes[session.focus_node_id]`.
 5. Build `ancestor_labels` = walk parent_id chain upward, collect labels.
-6. Stream events from `expand_phase2_node(node.label, session.resolution, session.known_topics, goal_label)`:
-   - `node_updated`: apply `resource` and `intuition_score` to the current node in session. Save session. Forward event.
+6. Stream events from `expand_phase2_node(node.label, session.known_topics, goal_label)`:
+   - `node_updated`: apply `resource` to the current node in session. Save session. Forward event.
    - `node_added`: create new `GraphNode` from data, set `parent_id=node_id`, `depth=node.depth+1`, `node_state="grayed"`. Add to session.nodes. Add to node.child_ids. Save session. Forward event.
    - `edge_added`: add edge to session.edges. Save session. Forward event.
    - `stream_done`: save session. Forward event. Close stream.
@@ -465,7 +452,7 @@ Calls `explain_prerequisite(...)` for a grayed node.
 
 1. Load session. Find node (must be `node_state="grayed"`).
 2. Find parent node via `node.parent_id`.
-3. Call `explain_prerequisite(node.label, parent.label, parent.description or "", session.resolution)`.
+3. Call `explain_prerequisite(node.label, parent.label, parent.description or "")`.
 4. Store result in `node.explain_more_text`.
 5. Save session.
 6. Return `{"explain_more_text": text}`.
@@ -582,7 +569,6 @@ Tailwind CSS, TypeScript, and Vite are assumed already configured.
 ```typescript
 export type NodeState = 'expanded' | 'grayed' | 'learned'
 export type Phase = '1' | '2'
-export type Resolution = 'intuitive' | 'technical'
 
 export interface Resource {
   url: string
@@ -603,7 +589,6 @@ export interface GraphNode {
   why_interesting: string | null
   phase: Phase
   node_state: NodeState
-  intuition_score: number | null
   resource: Resource | null
   parent_id: string | null
   child_ids: string[]
@@ -623,7 +608,7 @@ export interface Session {
   id: string
   created_at: string
   phase: Phase
-  resolution: Resolution | null
+  resolution: 'technical'
   root_topic: string
   selection_history: string[]
   current_phase1_node_id: string | null
@@ -646,7 +631,6 @@ getSession(id: string): Promise<Session>
 listSessions(): Promise<Array<{ id: string; root_topic: string; created_at: string; phase: Phase }>>
 selectTopic(sessionId: string, nodeId: string): Promise<Session>
 back(sessionId: string): Promise<Session>
-setResolution(sessionId: string, resolution: Resolution): Promise<Session>
 deepDive(sessionId: string, nodeId: string): Promise<{ session: Session }>
 explainNode(sessionId: string, nodeId: string): Promise<{ explain_more_text: string }>
 deleteNode(sessionId: string, nodeId: string): Promise<{ removed_node_ids: string[] }>
@@ -721,7 +705,6 @@ interface SessionStore {
   loadSession: (id: string) => Promise<void>
   selectTopic: (nodeId: string) => Promise<void>
   back: () => Promise<void>
-  setResolution: (r: Resolution) => Promise<void>
   deepDive: (nodeId: string) => Promise<void>
 
   // Phase 2 actions
@@ -736,7 +719,7 @@ interface SessionStore {
 
   // Internal SSE applicators
   _applyNodeAdded: (node: GraphNode) => void
-  _applyNodeUpdated: (patch: { id?: string; resource?: Resource; intuition_score?: number }) => void
+  _applyNodeUpdated: (patch: { id?: string; resource?: Resource }) => void
   _applyEdgeAdded: (edge: GraphEdge) => void
 }
 ```
@@ -753,7 +736,7 @@ Key implementation notes:
 1. Add `nodeId` to `streamingNodeIds`.
 2. Open SSE stream via `streamSSE` to `POST /api/session/{id}/node/{nodeId}/expand`.
 3. Handle events:
-   - `node_updated`: find the node in `session.nodes`, apply `resource` and `intuition_score`.
+   - `node_updated`: find the node in `session.nodes` and apply `resource`.
    - `node_added`: add the new grayed node to `session.nodes`. Also add its id to the parent node's `child_ids`.
    - `edge_added`: add the edge to `session.edges`.
    - `stream_done`: remove `nodeId` from `streamingNodeIds`.
@@ -801,8 +784,6 @@ Layout:
 - Top: breadcrumb showing the selection path. Each crumb is clickable and calls `store.back()` repeatedly until that ancestor is the current node. (Simplification: call back once per click on the crumb, or implement a `backTo(nodeId)` that pops until correct.)
 - Middle: large card for the current node. Shows label, description, and a "Deep Dive" button if the topic is specific enough.
 - Below the current node card: a row or grid of option cards, one per child node of the current node. Each is a `<Phase1OptionCard />`.
-- Bottom persistent bar: `<ResolutionPicker />` (compact inline version).
-
 When `store.isLoading` is true (after selecting a topic, while waiting for children to generate), show a skeleton/shimmer in the option card area.
 
 ---
@@ -829,27 +810,8 @@ Rendered inside `Phase1View` on the current node card.
 
 - Label: "Deep Dive →"
 - On click:
-  1. If `session.resolution === null`: open `<ResolutionPicker />` as a modal/overlay. Wait for selection.
-  2. Call `store.deepDive(currentNode.id)`.
-  3. Immediately call `store.expandNode(currentNode.id)` to kick off Phase 2 generation for the goal node.
-
----
-
-### `frontend/src/components/ResolutionPicker.tsx`
-
-Two large clickable cards:
-
-**Intuitive**
-- Subtitle: "Concepts, metaphors, the why"
-- Example: "I want to know that exp curves a function onto a rotational manifold"
-
-**Technical**
-- Subtitle: "Formal definitions, the how"
-- Example: "I want to derive exp from x' = Ax → x = e^(At)"
-
-On selection: calls `store.setResolution(r)`. The selected card gets a highlighted border.
-
-Can be rendered as a bottom bar in Phase1View (compact: just the two toggle buttons) or as a modal (full card layout) when triggered by Deep Dive.
+  1. Call `store.deepDive(currentNode.id)`.
+  2. Immediately call `store.expandNode(currentNode.id)` to kick off Phase 2 generation for the goal node.
 
 ---
 
@@ -908,8 +870,7 @@ const rfEdges = session.edges.map(e => ({
 Custom React Flow node for `node_state === "expanded"` or `"learned"`.
 
 Layout (top to bottom inside a card):
-- **Header row**: node label (bold, 15px) + intuition score badge on the right.
-  - Badge: 0.0–0.35 = "conceptual" with blue background, 0.35–0.65 = "mixed" with gray, 0.65–1.0 = "technical" with amber.
+- **Header row**: node label (bold, 15px).
 - **Description**: 2 sentences in 13px muted text.
 - **Resource block** (if `node.resource`):
   - Resource title as an external link (opens new tab)
@@ -977,7 +938,6 @@ Chat history from `node.chat_history` is pre-populated in the message list when 
 | GET | `/api/sessions` | — | List all sessions |
 | POST | `/api/session/{id}/select-topic` | `{node_id}` | Select subtopic, generate its children |
 | POST | `/api/session/{id}/back` | — | Pop selection stack |
-| POST | `/api/session/{id}/resolution` | `{resolution}` | Set resolution preference |
 | POST | `/api/session/{id}/deep-dive` | `{node_id}` | Transition to Phase 2 |
 | POST | `/api/session/{id}/node/{node_id}/expand` | — | Expand node into full resource + prereqs (SSE) |
 | POST | `/api/session/{id}/node/{node_id}/explain` | — | Get "explain more" text for a grayed node |
@@ -993,7 +953,7 @@ Chat history from `node.chat_history` is pre-populated in the message list when 
 
 | Event | Data |
 |-------|------|
-| `node_updated` | `{ resource: Resource, intuition_score: number }` — applied to the node being expanded |
+| `node_updated` | `{ resource: Resource }` — applied to the node being expanded |
 | `node_added` | Full `GraphNode` object — a new grayed prerequisite |
 | `edge_added` | Full `GraphEdge` object |
 | `stream_done` | `{}` |
