@@ -13,13 +13,13 @@ deep-dive testing work without OpenAI access even if an API key is present.
 ```bash
 cd backend
 uv sync
-ALPHAG3N_AI_MODE=mock uv run uvicorn app.main:app --reload --port 8000
+ALPHAG3N_USE_OPENAI=false uv run uvicorn app.main:app --reload --port 8000
 ```
 
-To force the real OpenAI backend, set both values:
+To enable the real OpenAI backend, set both values:
 
 ```bash
-ALPHAG3N_AI_MODE=openai OPENAI_API_KEY=sk-your-real-key uv run uvicorn app.main:app --reload --port 8000
+ALPHAG3N_USE_OPENAI=true OPENAI_API_KEY=sk-your-real-key uv run uvicorn app.main:app --reload --port 8000
 ```
 
 ## Frontend

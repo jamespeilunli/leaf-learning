@@ -15,16 +15,26 @@ API_KEY_PLACEHOLDER = "sk-your-key-here"
 _client: AsyncOpenAI | None = None
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def using_mock_ai() -> bool:
-    mode = os.getenv("ALPHAG3N_AI_MODE", "").strip().lower()
-    if mode == "openai":
-        return False
-    return True
+    return not _env_flag("ALPHAG3N_USE_OPENAI", default=False)
 
 
 def get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not api_key or api_key == API_KEY_PLACEHOLDER:
+            raise RuntimeError(
+                "OpenAI usage is enabled, but OPENAI_API_KEY is missing or still set "
+                "to the placeholder value."
+            )
         _client = AsyncOpenAI()
     return _client
 

@@ -13,13 +13,13 @@ resources, prerequisites, explanations, and chat responses without requiring a
 working API key.
 
 ```bash
-ALPHAG3N_AI_MODE=mock uv run uvicorn app.main:app --reload --port 8000
+ALPHAG3N_USE_OPENAI=false uv run uvicorn app.main:app --reload --port 8000
 ```
 
-To use OpenAI instead, set a real key and force OpenAI mode:
+To use OpenAI instead, set a real key and enable it explicitly:
 
 ```bash
-ALPHAG3N_AI_MODE=openai OPENAI_API_KEY=sk-your-real-key uv run uvicorn app.main:app --reload --port 8000
+ALPHAG3N_USE_OPENAI=true OPENAI_API_KEY=sk-your-real-key uv run uvicorn app.main:app --reload --port 8000
 ```
 
 The React dev server proxies `/api/*` requests to `http://localhost:8000`.
