@@ -116,8 +116,6 @@ def normalize_phase2_graph(session: Session) -> None:
                 canonical.why_interesting = duplicate.why_interesting
             if canonical.resource is None and duplicate.resource is not None:
                 canonical.resource = duplicate.resource
-            if canonical.intuition_score is None and duplicate.intuition_score is not None:
-                canonical.intuition_score = duplicate.intuition_score
             if canonical.explain_more_text in {None, "__known__"} and duplicate.explain_more_text not in {None}:
                 canonical.explain_more_text = duplicate.explain_more_text
             if not canonical.chat_history and duplicate.chat_history:

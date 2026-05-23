@@ -49,9 +49,6 @@ async def chat(session_id: str, node_id: str, payload: ChatRequest) -> Streaming
     node = _get_node(session, node_id)
     if node.node_state not in {"expanded", "learned"}:
         raise HTTPException(status_code=400, detail="Node chat is only available for expanded nodes.")
-    if not session.resolution:
-        raise HTTPException(status_code=400, detail="Resolution must be selected first.")
-
     goal_path = _goal_path(session, node)
     node_description = node.description or ""
     resource_description = node.resource.description if node.resource else ""
@@ -63,7 +60,6 @@ async def chat(session_id: str, node_id: str, payload: ChatRequest) -> Streaming
                 node.label,
                 node_description,
                 resource_description,
-                session.resolution,
                 goal_path,
                 node.chat_history[-20:],
                 payload.message,

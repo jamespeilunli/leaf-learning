@@ -47,9 +47,6 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
         raise HTTPException(status_code=400, detail="Phase 2 focus node is not set.")
     if node.node_state != "grayed" and node.id != session.focus_node_id:
         raise HTTPException(status_code=400, detail="Node is not expandable.")
-    if not session.resolution:
-        raise HTTPException(status_code=400, detail="Resolution must be selected first.")
-
     node.node_state = "expanded"
     save_session(session)
     goal_label = _get_node(session, session.focus_node_id).label
@@ -58,7 +55,6 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
     async def event_stream() -> Iterable[str]:
         async for event in expand_phase2_node(
             node.label,
-            session.resolution,
             session.known_topics,
             goal_label,
         ):
@@ -68,8 +64,6 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
             if event_name == "node_updated":
                 if data.get("resource"):
                     node.resource = Resource.model_validate(data["resource"])
-                node.intuition_score = data.get("intuition_score")
-                normalize_phase2_graph(session)
                 save_session(session)
                 payload = {"id": node.id, **data}
                 yield _sse("node_updated", payload)
@@ -134,15 +128,11 @@ async def explain_node(session_id: str, node_id: str) -> dict:
         raise HTTPException(status_code=400, detail="Only grayed nodes can be explained.")
     if not node.parent_id:
         raise HTTPException(status_code=400, detail="Node has no parent context.")
-    if not session.resolution:
-        raise HTTPException(status_code=400, detail="Resolution must be selected first.")
-
     parent = _get_node(session, node.parent_id)
     text = await explain_prerequisite(
         node.label,
         parent.label,
         parent.description or "",
-        session.resolution,
     )
     node.explain_more_text = text
     save_session(session)

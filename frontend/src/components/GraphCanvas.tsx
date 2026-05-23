@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 
 import dagre from 'dagre'
+import { ArrowLeft } from 'lucide-react'
 import ReactFlow, { Background, Controls, MiniMap } from 'reactflow'
 import type { Edge as RFEdge, Node as RFNode } from 'reactflow'
 import { Position } from 'reactflow'
@@ -64,6 +65,7 @@ function getLayoutedElements(nodes: LayoutNode[], edges: RFEdge[]) {
 export function GraphCanvas() {
   const session = useSessionStore((state) => state.session)
   const [nodeSizes, setNodeSizes] = useState<Record<string, { width: number; height: number }>>({})
+  const restartFlow = useSessionStore((state) => state.restartFlow)
 
   const graphNodes = useMemo(() => {
     if (!session) return []
@@ -115,10 +117,28 @@ export function GraphCanvas() {
   }, [graphNodes, nodeSizes, reportSize, rfEdges])
 
   if (!session) return null
+  const focusNode = session.focus_node_id ? session.nodes[session.focus_node_id] : null
 
   return (
     <div className="relative h-screen w-full overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(191,91,44,0.14),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(34,197,94,0.1),transparent_26%),linear-gradient(180deg,#f8f4ec_0%,#eef3f8_100%)]">
-      <div className="pointer-events-none absolute left-5 top-5 z-20 max-w-md rounded-[24px] border border-white/70 bg-white/78 px-5 py-4 shadow-[0_24px_60px_rgba(15,23,42,0.10)] backdrop-blur">
+      <div className="pointer-events-none absolute inset-x-0 top-4 z-20 flex items-start justify-between gap-4 px-4">
+        <button
+          aria-label="Back to start"
+          className="pointer-events-auto inline-flex h-11 items-center gap-2 rounded-full border border-white/70 bg-white/92 px-4 text-sm font-semibold text-[var(--ink)] shadow-[0_14px_34px_rgba(15,23,42,0.14)] backdrop-blur transition hover:border-[var(--accent)] hover:text-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2"
+          title="Back to start"
+          type="button"
+          onClick={restartFlow}
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back
+        </button>
+        <div className="pointer-events-auto max-w-[min(520px,calc(100vw-7rem))] rounded-full border border-white/70 bg-white/82 px-4 py-2 text-right shadow-[0_14px_34px_rgba(15,23,42,0.10)] backdrop-blur">
+          <div className="truncate text-sm font-semibold text-[var(--ink)]">
+            {focusNode?.label ?? session.root_topic}
+          </div>
+        </div>
+      </div>
+      <div className="pointer-events-none absolute left-5 top-20 z-20 max-w-md rounded-[24px] border border-white/70 bg-white/78 px-5 py-4 shadow-[0_24px_60px_rgba(15,23,42,0.10)] backdrop-blur">
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted-strong)]">
           Phase II Roadmap
         </p>

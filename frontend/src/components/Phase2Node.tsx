@@ -7,23 +7,12 @@ import type { NodeProps } from 'reactflow'
 import { useSessionStore } from '../store/useSessionStore'
 import type { GraphCanvasNodeData } from './GraphCanvas'
 
-function badgeForScore(score: number | null): { label: string; className: string } {
-  if (score === null || score <= 0.35) {
-    return { label: 'conceptual', className: 'bg-sky-100 text-sky-800' }
-  }
-  if (score <= 0.65) {
-    return { label: 'mixed', className: 'bg-slate-200 text-slate-700' }
-  }
-  return { label: 'technical', className: 'bg-amber-100 text-amber-800' }
-}
-
 export function Phase2Node({ data }: NodeProps<GraphCanvasNodeData>) {
   const { node, reportSize } = data
   const streamingNodeIds = useSessionStore((state) => state.streamingNodeIds)
   const openChat = useSessionStore((state) => state.openChat)
   const markLearned = useSessionStore((state) => state.markLearned)
   const deleteNode = useSessionStore((state) => state.deleteNode)
-  const badge = badgeForScore(node.intuition_score)
   const isStreaming = streamingNodeIds.has(node.id)
   const isLearned = node.node_state === 'learned'
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -56,8 +45,8 @@ export function Phase2Node({ data }: NodeProps<GraphCanvasNodeData>) {
           </p>
           <div className="mt-1 text-[16px] font-semibold leading-6 text-[var(--ink)]">{node.label}</div>
         </div>
-        <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase ${badge.className}`}>
-          {badge.label}
+        <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-sky-800">
+          technical
         </span>
       </div>
 

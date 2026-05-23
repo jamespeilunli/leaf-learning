@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from app.ai import generate_phase1_children
 from app.graph_utils import normalize_phase2_graph
-from app.models import GraphNode, Resolution, Session
+from app.models import GraphNode, Session
 from app.storage import list_sessions, load_session, save_session
 
 
@@ -18,10 +18,6 @@ class CreateSessionRequest(BaseModel):
 
 class SelectTopicRequest(BaseModel):
     node_id: str
-
-
-class ResolutionRequest(BaseModel):
-    resolution: Resolution
 
 
 class DeepDiveRequest(BaseModel):
@@ -128,9 +124,9 @@ def back(session_id: str) -> dict:
 
 
 @router.post("/session/{session_id}/resolution")
-def set_resolution(session_id: str, payload: ResolutionRequest) -> dict:
+def set_resolution(session_id: str) -> dict:
     session = load_session(session_id)
-    session.resolution = payload.resolution
+    session.resolution = "technical"
     save_session(session)
     return session.model_dump(by_alias=True)
 

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 import * as api from '../lib/api'
 import { streamSSE } from '../hooks/useSSE'
-import type { GraphEdge, GraphNode, Resource, Resolution, Session } from '../types'
+import type { GraphEdge, GraphNode, Resource, Session } from '../types'
 
 export const SESSION_STORAGE_KEY = 'roadmap_session_id'
 
@@ -13,7 +13,6 @@ function normalizedLabel(label: string): string {
 type ExpandPatch = {
   id?: string
   resource?: Resource
-  intuition_score?: number
 }
 
 interface SessionStore {
@@ -28,12 +27,12 @@ interface SessionStore {
   loadSession: (id: string) => Promise<void>
   selectTopic: (nodeId: string) => Promise<void>
   back: () => Promise<void>
-  setResolution: (r: Resolution) => Promise<void>
   deepDive: (nodeId: string) => Promise<void>
   expandNode: (nodeId: string) => Promise<void>
   explainNode: (nodeId: string) => Promise<void>
   markLearned: (nodeId: string) => Promise<void>
   deleteNode: (nodeId: string) => Promise<void>
+  restartFlow: () => void
   openChat: (nodeId: string) => void
   closeChat: () => void
   _applyNodeAdded: (node: GraphNode) => void
@@ -119,18 +118,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         isLoading: false,
         error: error instanceof Error ? error.message : 'Failed to go back.',
       })
-    }
-  },
-
-  async setResolution(resolution) {
-    const sessionId = get().sessionId
-    if (!sessionId) return
-
-    try {
-      const session = await api.setResolution(sessionId, resolution)
-      set({ session, error: null })
-    } catch (error) {
-      set({ error: error instanceof Error ? error.message : 'Failed to set resolution.' })
     }
   },
 
@@ -308,6 +295,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
+  restartFlow() {
+    localStorage.removeItem(SESSION_STORAGE_KEY)
+    set({
+      sessionId: null,
+      session: null,
+      isLoading: false,
+      streamingNodeIds: new Set<string>(),
+      explainingNodeIds: new Set<string>(),
+      chatOpenNodeId: null,
+      error: null,
+    })
+  },
+
   openChat(nodeId) {
     set({ chatOpenNodeId: nodeId })
   },
@@ -357,7 +357,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               ...node,
               phase: '2',
               resource: patch.resource ?? node.resource,
-              intuition_score: patch.intuition_score ?? node.intuition_score,
             },
           },
         },
