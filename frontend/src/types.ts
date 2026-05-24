@@ -23,6 +23,7 @@ export interface GraphNode {
   sources: Resource[]
   resource: Resource | null
   parent_id: string | null
+  parent_ids: string[]
   child_ids: string[]
   depth: number
   chat_history: ChatMessage[]

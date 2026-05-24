@@ -329,6 +329,27 @@ async def suggest_prerequisite(
     }
 
 
+async def topics_are_same_or_similar(
+    left_label: str,
+    right_label: str,
+    *,
+    phase: str,
+    goal_label: str | None = None,
+    parent_label: str | None = None,
+) -> bool:
+    left_key = _key(left_label)
+    right_key = _key(right_label)
+    if left_key == right_key:
+        return True
+
+    left_tokens = set(left_key.split())
+    right_tokens = set(right_key.split())
+    if not left_tokens or not right_tokens:
+        return False
+
+    overlap = len(left_tokens & right_tokens)
+    union = len(left_tokens | right_tokens)
+    return union > 0 and overlap / union >= 0.8
 async def chat_with_node(
     node_label: str,
     node_description: str,

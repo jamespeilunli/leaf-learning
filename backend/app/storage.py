@@ -2,6 +2,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from app.graph_utils import repair_session_graph
 from app.models import Session
 
 
@@ -17,6 +18,7 @@ def session_path(session_id: str) -> Path:
 
 
 def save_session(session: Session) -> None:
+    repair_session_graph(session)
     session_path(session.id).write_text(session.model_dump_json(indent=2, by_alias=True))
 
 
@@ -24,14 +26,17 @@ def load_session(session_id: str) -> Session:
     path = session_path(session_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    return Session.model_validate_json(path.read_text())
+    session = Session.model_validate_json(path.read_text())
+    repaired = repair_session_graph(session)
+    path.write_text(repaired.model_dump_json(indent=2, by_alias=True))
+    return repaired
 
 
 def list_sessions() -> list[dict]:
     result: list[dict] = []
     for file_path in SESSIONS_DIR.glob("*.json"):
         try:
-            session = Session.model_validate_json(file_path.read_text())
+            session = repair_session_graph(Session.model_validate_json(file_path.read_text()))
         except Exception:
             continue
 

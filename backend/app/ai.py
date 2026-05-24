@@ -255,6 +255,50 @@ No markdown fences. No prose outside JSON.
     }
 
 
+async def topics_are_same_or_similar(
+    left_label: str,
+    right_label: str,
+    *,
+    phase: str,
+    goal_label: str | None = None,
+    parent_label: str | None = None,
+) -> bool:
+    if using_mock_ai():
+        return await mock_ai.topics_are_same_or_similar(
+            left_label,
+            right_label,
+            phase=phase,
+            goal_label=goal_label,
+            parent_label=parent_label,
+        )
+
+    instructions = f"""
+You are deciding whether two roadmap topic labels should be treated as the same node.
+Return ONLY a JSON object with this exact shape:
+{{
+  "same_or_similar": true
+}}
+
+Answer true only when the two labels refer to the same concept, or to concepts so similar
+that the roadmap should merge them into one normalized node.
+Answer false when one label is broader, narrower, adjacent, or merely related.
+
+Phase: {phase}
+Overall goal: {goal_label or ""}
+Immediate parent context: {parent_label or ""}
+""".strip()
+
+    response = await get_client().responses.create(
+        model=MODEL,
+        instructions=instructions,
+        input=(
+            f'Label A: "{left_label}"\n'
+            f'Label B: "{right_label}"\n'
+            "Should these be treated as the same or similar roadmap dependency?"
+        ),
+    )
+    payload = _loads_json_object(_extract_response_text(response))
+    return bool(payload["same_or_similar"])
 async def chat_with_node(
     node_label: str,
     node_description: str,
