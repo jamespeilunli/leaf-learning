@@ -92,6 +92,13 @@ vi.mock('../lib/api')
 vi.mock('../hooks/useSSE', () => ({
   streamSSE: vi.fn(),
 }))
+vi.mock('lucide-react', async () => {
+  const actual = await vi.importActual<typeof import('lucide-react')>('lucide-react')
+  return {
+    ...actual,
+    Leaf: (props: React.SVGProps<SVGSVGElement>) => <svg data-testid="leaf-icon" {...props} />,
+  }
+})
 
 const mockedApi = vi.mocked(api)
 const mockedStreamSSE = vi.mocked(streamSSE)
@@ -130,8 +137,15 @@ describe('frontend components', () => {
 
     render(<StartScreen />)
 
-    expect(await screen.findByText('Continue a previous session')).toBeInTheDocument()
-    await user.type(screen.getByLabelText('What do you want to learn?'), 'machine learning')
+    expect(screen.getByText('Leaf Learning')).toBeInTheDocument()
+    expect(screen.getByText('Ready to learn?')).toBeInTheDocument()
+    expect(screen.getByTestId('leaf-icon')).toBeInTheDocument()
+    const resumeHeading = await screen.findByText('Continue a previous session')
+    expect(resumeHeading).toBeInTheDocument()
+    expect(
+      screen.getByLabelText('Ready to learn?').compareDocumentPosition(resumeHeading),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    await user.type(screen.getByLabelText('Ready to learn?'), 'machine learning')
     await user.click(screen.getByRole('button', { name: 'Start exploring' }))
 
     expect(mockedApi.createSession).toHaveBeenCalledWith('machine learning')
