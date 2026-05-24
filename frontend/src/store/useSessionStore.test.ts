@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { waitFor } from '@testing-library/react'
 
 import * as api from '../lib/api'
+import * as browserData from '../lib/browserData'
 import { streamSSE } from '../hooks/useSSE'
 import { SESSION_STORAGE_KEY, useSessionStore } from './useSessionStore'
 import { makeNode, makePhase2Session, makeSession } from '../test/fixtures'
@@ -12,9 +13,16 @@ vi.mock('../lib/api')
 vi.mock('../hooks/useSSE', () => ({
   streamSSE: vi.fn(),
 }))
+vi.mock('../lib/browserData', () => ({
+  clearBrowserData: vi.fn().mockImplementation(async () => {
+    localStorage.clear()
+    sessionStorage.clear()
+  }),
+}))
 
 const mockedApi = vi.mocked(api)
 const mockedStreamSSE = vi.mocked(streamSSE)
+const mockedClearBrowserData = vi.mocked(browserData.clearBrowserData)
 
 function getState() {
   return useSessionStore.getState()
@@ -311,7 +319,7 @@ describe('useSessionStore', () => {
     expect(getState().error).toBeNull()
   })
 
-  it('manages chat visibility and back-to-start restart state', () => {
+  it('manages chat visibility and clears browser data on restart', async () => {
     useSessionStore.setState({
       sessionId: 'session-1',
       session: makePhase2Session(),
@@ -320,6 +328,7 @@ describe('useSessionStore', () => {
       selectedPhase2NodeId: 'goal',
     })
     localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
+    mockedApi.clearSessions.mockResolvedValue({ deleted_count: 1 })
 
     getState().openChat('goal')
     expect(getState().chatOpenNodeId).toBe('goal')
@@ -327,7 +336,9 @@ describe('useSessionStore', () => {
     getState().closeChat()
     expect(getState().chatOpenNodeId).toBeNull()
 
-    getState().restartFlow()
+    await expect(getState().restartFlow()).resolves.toBe(true)
+    expect(mockedApi.clearSessions).toHaveBeenCalledTimes(1)
+    expect(mockedClearBrowserData).toHaveBeenCalledTimes(1)
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
     expect(getState().session).toBeNull()
     expect(getState().streamingNodeIds.size).toBe(0)

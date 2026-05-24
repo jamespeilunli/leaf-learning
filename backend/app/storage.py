@@ -103,3 +103,11 @@ def list_sessions() -> list[dict]:
         )
 
     return sorted(result, key=lambda item: item["created_at"], reverse=True)
+
+
+def delete_all_sessions() -> int:
+    deleted = 0
+    for file_path in SESSIONS_DIR.glob("*.json"):
+        file_path.unlink(missing_ok=True)
+        deleted += 1
+    return deleted

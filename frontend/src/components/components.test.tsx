@@ -5,6 +5,7 @@ import type { ComponentType, ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '../lib/api'
+import * as browserData from '../lib/browserData'
 import { streamSSE } from '../hooks/useSSE'
 import { GraphCanvas } from './GraphCanvas'
 import { GrayedNode } from './GrayedNode'
@@ -93,6 +94,12 @@ vi.mock('../lib/api')
 vi.mock('../hooks/useSSE', () => ({
   streamSSE: vi.fn(),
 }))
+vi.mock('../lib/browserData', () => ({
+  clearBrowserData: vi.fn().mockImplementation(async () => {
+    localStorage.clear()
+    sessionStorage.clear()
+  }),
+}))
 vi.mock('lucide-react', async () => {
   const actual = await vi.importActual<typeof import('lucide-react')>('lucide-react')
   return {
@@ -103,6 +110,7 @@ vi.mock('lucide-react', async () => {
 
 const mockedApi = vi.mocked(api)
 const mockedStreamSSE = vi.mocked(streamSSE)
+const mockedClearBrowserData = vi.mocked(browserData.clearBrowserData)
 
 function setStoreSession(session: Session, sessionId = 'session-1') {
   useSessionStore.setState({ sessionId, session })
@@ -154,6 +162,21 @@ describe('frontend components', () => {
 
     await user.click(screen.getByRole('button', { name: /Distributed Systems/i }))
     expect(mockedApi.getSession).toHaveBeenCalledWith('old-session')
+  })
+
+  it('StartScreen exposes a clear cache action', async () => {
+    const user = userEvent.setup()
+    mockedApi.listSessions.mockResolvedValue([])
+    mockedApi.clearSessions.mockResolvedValue({ deleted_count: 1 })
+    setStoreSession(makeSession())
+    localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
+
+    render(<StartScreen />)
+
+    await user.click(screen.getByRole('button', { name: 'Clear cache' }))
+
+    await waitFor(() => expect(mockedClearBrowserData).toHaveBeenCalledTimes(1))
+    expect(useSessionStore.getState().session).toBeNull()
   })
 
   it('Phase1OptionCard displays subtopic context and selects the node', async () => {
@@ -303,7 +326,7 @@ describe('frontend components', () => {
     expect(mockedStreamSSE).not.toHaveBeenCalled()
   })
 
-  it('GraphCanvas renders the Phase 2 graph chrome and Back control', async () => {
+  it('GraphCanvas renders the Phase 2 graph chrome and clear-cache control', async () => {
     const user = userEvent.setup()
     const session = makePhase2Session()
     session.nodes.hidden = makeNode({
@@ -319,6 +342,7 @@ describe('frontend components', () => {
     session.edges.push({ id: 'edge-hidden', from: 'prereq', to: 'hidden', label: 'requires' })
     setStoreSession(session)
     localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
+    mockedApi.clearSessions.mockResolvedValue({ deleted_count: 1 })
 
     render(<GraphCanvas />)
 
@@ -327,7 +351,8 @@ describe('frontend components', () => {
     expect(screen.getAllByText('Representation Learning').length).toBeGreaterThan(0)
     expect(screen.queryByText('Hidden Fundamental')).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Back to start' }))
+    await user.click(screen.getByRole('button', { name: 'Clear cache' }))
+    await waitFor(() => expect(mockedClearBrowserData).toHaveBeenCalledTimes(1))
     expect(useSessionStore.getState().session).toBeNull()
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
   })

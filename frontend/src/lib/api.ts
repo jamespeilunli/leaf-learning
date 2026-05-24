@@ -25,6 +25,11 @@ export async function listSessions(): Promise<
   return response.data
 }
 
+export async function clearSessions(): Promise<{ deleted_count: number }> {
+  const response = await http.delete('/sessions')
+  return response.data
+}
+
 export async function selectTopic(sessionId: string, nodeId: string): Promise<Session> {
   const response = await http.post(`/session/${sessionId}/select-topic`, { node_id: nodeId })
   return response.data

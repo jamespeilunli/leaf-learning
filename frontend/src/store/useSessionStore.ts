@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import axios from 'axios'
 
 import * as api from '../lib/api'
+import { clearBrowserData } from '../lib/browserData'
 import { streamSSE } from '../hooks/useSSE'
 import type { GraphEdge, GraphNode, Resource, Session } from '../types'
 
@@ -81,7 +82,7 @@ interface SessionStore {
   markLearned: (nodeId: string) => Promise<void>
   deleteNode: (nodeId: string) => Promise<void>
   suggestPrerequisite: (nodeId: string, message: string) => Promise<void>
-  restartFlow: () => void
+  restartFlow: () => Promise<boolean>
   openChat: (nodeId: string) => void
   closeChat: () => void
   openNodeDetails: (nodeId: string) => void
@@ -406,8 +407,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  restartFlow() {
-    localStorage.removeItem(SESSION_STORAGE_KEY)
+  async restartFlow() {
+    await api.clearSessions()
+    await clearBrowserData()
     set({
       sessionId: null,
       session: null,
@@ -419,6 +421,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       selectedPhase2NodeId: null,
       error: null,
     })
+    return true
   },
 
   openChat(nodeId) {

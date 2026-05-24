@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { ArrowLeft, Loader2, Network, Sparkles } from 'lucide-react'
+import { Loader2, Network, RotateCcw, Sparkles } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
 import type { ForceGraphMethods } from 'react-force-graph-2d'
 
@@ -358,12 +358,12 @@ export function Phase1View() {
                 </div>
               ) : null}
               <Button
-                leftIcon={<ArrowLeft aria-hidden="true" className="h-4 w-4" />}
+                leftIcon={<RotateCcw aria-hidden="true" className="h-4 w-4" />}
                 size="sm"
                 variant="secondary"
-                onClick={restartFlow}
+                onClick={() => void restartFlow()}
               >
-                Start
+                Clear cache
               </Button>
             </div>
           </div>
