@@ -22,6 +22,7 @@ export function GrayedNode({ data }: NodeProps<{ node: GraphNode }>) {
 
   return (
     <div
+      aria-label={`Activate ${node.label}`}
       aria-disabled={isDisabled}
       className="group relative h-[132px] w-[236px] cursor-pointer rounded-[8px] border border-dashed border-slate-400 bg-white/55 p-3 text-left opacity-80 shadow-[0_10px_22px_rgba(15,23,42,0.10)] backdrop-blur transition hover:border-slate-500 hover:bg-white/70 hover:opacity-100 hover:shadow-[0_16px_34px_rgba(15,23,42,0.16)] focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 aria-disabled:cursor-default"
       role="button"

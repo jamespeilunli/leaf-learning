@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { getLaunchGraphOrigin } from './LaunchGraphBackground'
+import { getLaunchGraphOrigin } from './launchGraphBackgroundLayout'
 
 describe('getLaunchGraphOrigin', () => {
   it('centers the launch graph horizontally and shifts it up by a quarter screen', () => {

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import axios from 'axios'
 
 import * as api from '../lib/api'
 import { streamSSE } from '../hooks/useSSE'
@@ -8,6 +9,46 @@ export const SESSION_STORAGE_KEY = 'roadmap_session_id'
 
 function normalizedLabel(label: string): string {
   return label.toLowerCase().trim().replace(/\s+/g, ' ')
+}
+
+function collectSubtree(session: Session, nodeId: string): Set<string> {
+  const collected = new Set<string>()
+  const stack = [nodeId]
+
+  while (stack.length) {
+    const currentId = stack.pop()
+    if (!currentId || collected.has(currentId)) continue
+
+    collected.add(currentId)
+    const node = session.nodes[currentId]
+    if (!node) continue
+
+    for (const childId of node.child_ids) {
+      stack.push(childId)
+    }
+  }
+
+  return collected
+}
+
+function removeNodesFromSession(session: Session, removed: Set<string>): Session {
+  const nodes = Object.fromEntries(
+    Object.entries(session.nodes)
+      .filter(([id]) => !removed.has(id))
+      .map(([id, node]) => [
+        id,
+        {
+          ...node,
+          child_ids: node.child_ids.filter((childId) => !removed.has(childId)),
+        },
+      ]),
+  ) as Record<string, GraphNode>
+
+  const edges = session.edges.filter(
+    (edge) => !removed.has(edge.from) && !removed.has(edge.to),
+  )
+
+  return { ...session, nodes, edges }
 }
 
 type ExpandPatch = {
@@ -22,6 +63,7 @@ interface SessionStore {
   isLoading: boolean
   streamingNodeIds: Set<string>
   explainingNodeIds: Set<string>
+  deletingNodeIds: Set<string>
   chatOpenNodeId: string | null
   selectedPhase2NodeId: string | null
   error: string | null
@@ -52,6 +94,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   isLoading: false,
   streamingNodeIds: new Set<string>(),
   explainingNodeIds: new Set<string>(),
+  deletingNodeIds: new Set<string>(),
   chatOpenNodeId: null,
   selectedPhase2NodeId: null,
   error: null,
@@ -292,29 +335,56 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   async deleteNode(nodeId) {
-    const { sessionId } = get()
-    if (!sessionId) return
+    const { sessionId, session } = get()
+    if (!sessionId || !session || get().deletingNodeIds.has(nodeId)) return
+    if (!session.nodes[nodeId]) return
+
+    const locallyRemoved = collectSubtree(session, nodeId)
+
+    const nextDeleting = new Set(get().deletingNodeIds)
+    nextDeleting.add(nodeId)
+    set({ deletingNodeIds: nextDeleting, error: null })
+
+    const applyRemoval = (removed: Set<string>) => {
+      set((state) => {
+        if (!state.session) return state
+
+        const streamingNodeIds = new Set(
+          [...state.streamingNodeIds].filter((id) => !removed.has(id)),
+        )
+        const explainingNodeIds = new Set(
+          [...state.explainingNodeIds].filter((id) => !removed.has(id)),
+        )
+
+        return {
+          session: removeNodesFromSession(state.session, removed),
+          streamingNodeIds,
+          explainingNodeIds,
+          chatOpenNodeId:
+            state.chatOpenNodeId && removed.has(state.chatOpenNodeId)
+              ? null
+              : state.chatOpenNodeId,
+          selectedPhase2NodeId:
+            state.selectedPhase2NodeId && removed.has(state.selectedPhase2NodeId)
+              ? null
+              : state.selectedPhase2NodeId,
+        }
+      })
+    }
 
     try {
       const response = await api.deleteNode(sessionId, nodeId)
-      const removed = new Set(response.removed_node_ids)
-      set((state) => {
-        if (!state.session) return state
-        const nodes = Object.fromEntries(
-          Object.entries(state.session.nodes).filter(([id]) => !removed.has(id)),
-        ) as Record<string, GraphNode>
-        const edges = state.session.edges.filter(
-          (edge) => !removed.has(edge.from) && !removed.has(edge.to),
-        )
-
-        for (const currentNode of Object.values(nodes)) {
-          currentNode.child_ids = currentNode.child_ids.filter((childId) => !removed.has(childId))
-        }
-
-        return { session: { ...state.session, nodes, edges } }
-      })
+      applyRemoval(new Set([...locallyRemoved, ...response.removed_node_ids]))
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : 'Failed to delete node.' })
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        applyRemoval(locallyRemoved)
+      } else {
+        set({ error: error instanceof Error ? error.message : 'Failed to delete node.' })
+      }
+    } finally {
+      const current = new Set(get().deletingNodeIds)
+      current.delete(nodeId)
+      set({ deletingNodeIds: current })
     }
   },
 
@@ -341,6 +411,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       isLoading: false,
       streamingNodeIds: new Set<string>(),
       explainingNodeIds: new Set<string>(),
+      deletingNodeIds: new Set<string>(),
       chatOpenNodeId: null,
       selectedPhase2NodeId: null,
       error: null,

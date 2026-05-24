@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { waitFor } from '@testing-library/react'
 
 import * as api from '../lib/api'
 import { streamSSE } from '../hooks/useSSE'
@@ -154,6 +155,52 @@ describe('useSessionStore', () => {
     expect(updated.edges).toContainEqual(edge)
   })
 
+  it('shows streamed child nodes before expansion completes', async () => {
+    const session = makePhase2Session({
+      nodes: {
+        goal: makeNode({
+          id: 'goal',
+          label: 'Representation Learning',
+          phase: '2',
+          node_state: 'grayed',
+          child_ids: [],
+        }),
+      },
+      edges: [],
+    })
+    const child = makeNode({
+      id: 'vector',
+      label: 'Vector Spaces',
+      phase: '2',
+      node_state: 'grayed',
+      parent_id: 'goal',
+    })
+    let finishStream!: () => void
+    const streamCanFinish = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+    useSessionStore.setState({ sessionId: 'session-1', session })
+    mockedStreamSSE.mockImplementation(async function* () {
+      yield { event: 'node_added', data: child }
+      await streamCanFinish
+      yield { event: 'stream_done', data: {} }
+    })
+
+    const expand = getState().expandNode('goal')
+    await waitFor(() => {
+      expect((getState().session as Session).nodes.vector).toEqual(child)
+    })
+
+    const duringStream = getState().session as Session
+    expect(duringStream.nodes.goal.child_ids).toContain('vector')
+    expect(getState().streamingNodeIds.has('goal')).toBe(true)
+
+    finishStream()
+    await expand
+
+    expect(getState().streamingNodeIds.has('goal')).toBe(false)
+  })
+
   it('explains grayed nodes, marks learned duplicates, and prunes subtrees', async () => {
     const session = makePhase2Session()
     useSessionStore.setState({ sessionId: 'session-1', session })
@@ -174,6 +221,46 @@ describe('useSessionStore', () => {
     const pruned = getState().session as Session
     expect(pruned.nodes.prereq).toBeUndefined()
     expect(pruned.edges.some((edge) => edge.to === 'prereq')).toBe(false)
+  })
+
+  it('removes stale local subtrees when the backend already pruned them', async () => {
+    const session = makePhase2Session()
+    session.nodes.prereq.child_ids = ['nested']
+    session.nodes.nested = makeNode({
+      id: 'nested',
+      label: 'Nested prerequisite',
+      phase: '2',
+      node_state: 'grayed',
+      parent_id: 'prereq',
+      depth: 2,
+    })
+    session.edges.push({ id: 'edge-nested', from: 'prereq', to: 'nested', label: 'requires' })
+    useSessionStore.setState({
+      sessionId: 'session-1',
+      session,
+      chatOpenNodeId: 'nested',
+      selectedPhase2NodeId: 'prereq',
+      streamingNodeIds: new Set(['nested']),
+      explainingNodeIds: new Set(['prereq']),
+    })
+    mockedApi.deleteNode.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 404 },
+      message: 'not found',
+    })
+
+    await getState().deleteNode('prereq')
+
+    const pruned = getState().session as Session
+    expect(pruned.nodes.prereq).toBeUndefined()
+    expect(pruned.nodes.nested).toBeUndefined()
+    expect(pruned.nodes.goal.child_ids).not.toContain('prereq')
+    expect(pruned.edges.some((edge) => edge.to === 'nested')).toBe(false)
+    expect(getState().chatOpenNodeId).toBeNull()
+    expect(getState().selectedPhase2NodeId).toBeNull()
+    expect(getState().streamingNodeIds.has('nested')).toBe(false)
+    expect(getState().explainingNodeIds.has('prereq')).toBe(false)
+    expect(getState().error).toBeNull()
   })
 
   it('manages chat visibility and back-to-start restart state', () => {
