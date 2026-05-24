@@ -52,24 +52,33 @@ describe('useSessionStore', () => {
     expect(getState().session).toBeNull()
   })
 
-  it('runs phase 1 navigation and resolution mutations through the API', async () => {
+  it('runs phase 1 navigation and expansion mutations through the API', async () => {
     useSessionStore.setState({ sessionId: 'session-1', session: makeSession() })
     const selected = makeSession({ current_phase1_node_id: 'child-a', selection_history: ['root'] })
+    const expanded = makeSession({
+      nodes: {
+        ...makeSession().nodes,
+        'child-a': makeNode({
+          id: 'child-a',
+          label: 'Representation Learning',
+          child_ids: ['grandchild'],
+        }),
+      },
+    })
     const backed = makeSession()
-    const resolved = makeSession({ resolution: 'technical' })
     mockedApi.selectTopic.mockResolvedValue(selected)
+    mockedApi.expandPhase1Topic.mockResolvedValue(expanded)
     mockedApi.back.mockResolvedValue(backed)
-    mockedApi.setResolution.mockResolvedValue(resolved)
 
     await getState().selectTopic('child-a')
     expect(getState().session).toBe(selected)
 
+    await getState().expandPhase1Topic('child-a')
+    expect(mockedApi.expandPhase1Topic).toHaveBeenCalledWith('session-1', 'child-a')
+    expect(getState().session).toBe(expanded)
+
     await getState().back()
     expect(getState().session).toBe(backed)
-
-    await getState().setResolution('technical')
-    expect(mockedApi.setResolution).toHaveBeenCalledWith('session-1', 'technical')
-    expect(getState().session).toBe(resolved)
   })
 
   it('starts deep dive and expands the focus node', async () => {
@@ -118,7 +127,13 @@ describe('useSessionStore', () => {
             title: 'Resource',
             description: 'Resource description.',
           },
-          intuition_score: 0.4,
+          sources: [
+            {
+              url: 'https://example.com/advanced',
+              title: 'Advanced Resource',
+              description: 'Advanced description.',
+            },
+          ],
         },
       }
       yield { event: 'node_added', data: child }
@@ -130,7 +145,8 @@ describe('useSessionStore', () => {
     const updated = getState().session as Session
     expect(updated.nodes.goal.node_state).toBe('expanded')
     expect(updated.nodes.goal.resource?.title).toBe('Resource')
-    expect(updated.nodes.goal.intuition_score).toBe(0.4)
+    expect(updated.nodes.goal.sources).toHaveLength(1)
+    expect(updated.nodes.goal.sources[0].title).toBe('Advanced Resource')
     expect(updated.nodes.goal.child_ids).toContain('vector')
     expect(updated.edges).toContainEqual(edge)
   })
@@ -163,6 +179,7 @@ describe('useSessionStore', () => {
       session: makePhase2Session(),
       streamingNodeIds: new Set(['goal']),
       explainingNodeIds: new Set(['prereq']),
+      selectedPhase2NodeId: 'goal',
     })
     localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
 
@@ -177,6 +194,7 @@ describe('useSessionStore', () => {
     expect(getState().session).toBeNull()
     expect(getState().streamingNodeIds.size).toBe(0)
     expect(getState().explainingNodeIds.size).toBe(0)
+    expect(getState().selectedPhase2NodeId).toBeNull()
   })
 
   it('stores API and stream failures as user-visible errors', async () => {

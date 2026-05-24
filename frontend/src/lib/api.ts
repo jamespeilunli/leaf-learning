@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-import type { Phase, Session } from '../types'
+import type { GraphEdge, GraphNode, Phase, Session } from '../types'
 
 const http = axios.create({
   baseURL: '/api',
@@ -61,6 +61,15 @@ export async function deleteNode(
   nodeId: string,
 ): Promise<{ removed_node_ids: string[] }> {
   const response = await http.delete(`/session/${sessionId}/node/${nodeId}`)
+  return response.data
+}
+
+export async function suggestPrerequisite(
+  sessionId: string,
+  nodeId: string,
+  message: string,
+): Promise<{ node: GraphNode; edge: GraphEdge }> {
+  const response = await http.post(`/session/${sessionId}/node/${nodeId}/suggest-prerequisite`, { message })
   return response.data
 }
 

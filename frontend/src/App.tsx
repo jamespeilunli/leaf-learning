@@ -1,13 +1,29 @@
+import { useEffect } from 'react'
+
+import axios from 'axios'
+import { ReactFlowProvider } from 'reactflow'
+
 import { GraphCanvas } from './components/GraphCanvas'
-import { NodeChatPanel } from './components/NodeChatPanel'
 import { Phase1View } from './components/Phase1View'
+import { Phase2Sidebar } from './components/Phase2Sidebar'
 import { StartScreen } from './components/StartScreen'
-import { useSessionStore } from './store/useSessionStore'
+import { SESSION_STORAGE_KEY, useSessionStore } from './store/useSessionStore'
 
 function App() {
   const session = useSessionStore((state) => state.session)
   const isLoading = useSessionStore((state) => state.isLoading)
-  const chatOpenNodeId = useSessionStore((state) => state.chatOpenNodeId)
+  const loadSession = useSessionStore((state) => state.loadSession)
+
+  useEffect(() => {
+    const sessionId = localStorage.getItem(SESSION_STORAGE_KEY)
+    if (!sessionId) return
+
+    void loadSession(sessionId).catch((error) => {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        localStorage.removeItem(SESSION_STORAGE_KEY)
+      }
+    })
+  }, [loadSession])
 
   if (!session) {
     return <StartScreen key={isLoading ? 'loading' : 'start'} />
@@ -19,8 +35,10 @@ function App() {
 
   return (
     <main className="relative h-screen w-full overflow-hidden">
-      <GraphCanvas />
-      {chatOpenNodeId ? <NodeChatPanel key={chatOpenNodeId} /> : null}
+      <ReactFlowProvider>
+        <GraphCanvas />
+        <Phase2Sidebar />
+      </ReactFlowProvider>
     </main>
   )
 }
