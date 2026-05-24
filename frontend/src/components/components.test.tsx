@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { forwardRef, useImperativeHandle } from 'react'
 import type { ComponentType, ReactNode } from 'react'
@@ -12,6 +12,7 @@ import { NodeChatPanel } from './NodeChatPanel'
 import { Phase1OptionCard } from './Phase1OptionCard'
 import { Phase1View } from './Phase1View'
 import { Phase2Node } from './Phase2Node'
+import { Phase2Sidebar } from './Phase2Sidebar'
 import { StartScreen } from './StartScreen'
 import { SESSION_STORAGE_KEY, useSessionStore } from '../store/useSessionStore'
 import { makeNode, makePhase2Session, makeSession } from '../test/fixtures'
@@ -208,9 +209,22 @@ describe('frontend components', () => {
     render(<Phase1View />)
 
     await user.click(screen.getByRole('button', { name: 'Machine Learning' }))
-    await user.click(screen.getByRole('button', { name: 'Deep Dive →' }))
+    await user.click(screen.getByRole('button', { name: 'Deep Dive' }))
     expect(mockedApi.deepDive).toHaveBeenCalledWith('session-1', 'root')
     expect(mockedStreamSSE).toHaveBeenCalled()
+  })
+
+  it('Phase2Sidebar exposes node actions and opens node chat', async () => {
+    const user = userEvent.setup()
+    const session = makePhase2Session()
+    setStoreSession(session)
+    useSessionStore.setState({ selectedPhase2NodeId: 'goal' })
+
+    render(<Phase2Sidebar />)
+
+    expect(screen.getByRole('heading', { name: 'Representation Learning' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Ask' }))
+    expect(useSessionStore.getState().chatOpenNodeId).toBe('goal')
   })
 
   it('Phase2Node shows resource state and opens the node details sidebar', async () => {
@@ -251,6 +265,28 @@ describe('frontend components', () => {
       />,
     )
     expect(screen.getByText('Learned elsewhere')).toBeInTheDocument()
+  })
+
+  it('GrayedNode activates on pointer down and keeps delete isolated', async () => {
+    const session = makePhase2Session()
+    setStoreSession(session)
+    mockedStreamSSE.mockImplementation(async function* () {})
+    mockedApi.deleteNode.mockResolvedValue({ removed_node_ids: ['prereq'] })
+
+    render(
+      <GrayedNode data={{ node: session.nodes.prereq }} {...nodeProps('prereq')} />,
+    )
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Activate Vector Spaces' }), {
+      button: 0,
+    })
+    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/prereq/expand', {})
+
+    mockedStreamSSE.mockClear()
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Remove Vector Spaces' }), {
+      button: 0,
+    })
+    expect(mockedStreamSSE).not.toHaveBeenCalled()
   })
 
   it('GraphCanvas renders the Phase 2 graph chrome and Back control', async () => {

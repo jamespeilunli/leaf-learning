@@ -26,7 +26,7 @@ type SimNode = LaunchGraphNode &
     driftOffset: number;
   };
 
-type SimLink = LaunchGraphLink & {
+type SimLink = Omit<LaunchGraphLink, "source" | "target"> & {
   source: SimNode;
   target: SimNode;
 } & SimulationLinkDatum<SimNode>;
@@ -221,15 +221,14 @@ export function LaunchGraphBackground() {
       aria-hidden="true"
       className="pointer-events-none absolute inset-0 overflow-hidden"
     >
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,#f6f7ee_0%,#e8efdf_32%,#d9e7d5_58%,#c6d7c8_100%)]" />
-      <div className="absolute inset-x-[-8%] top-[-12%] h-[42rem] rounded-full bg-[radial-gradient(circle,rgba(245,250,235,0.92)_0%,rgba(245,250,235,0)_68%)]" />
-      <div className="absolute inset-x-[12%] bottom-[-24%] h-[30rem] rounded-full bg-[radial-gradient(circle,rgba(171,197,167,0.26)_0%,rgba(171,197,167,0)_72%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(145deg,#f8f7ef_0%,#e9efe2_42%,#d7e4d4_100%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(39,71,49,0.045)_1px,transparent_1px),linear-gradient(180deg,rgba(39,71,49,0.04)_1px,transparent_1px)] bg-[size:42px_42px]" />
       <canvas
         ref={canvasRef}
         className="absolute inset-0 h-full w-full opacity-90"
       />
       <div className="absolute inset-0 backdrop-blur-[2px]" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(237,243,231,0)_0%,rgba(237,243,231,0.10)_48%,rgba(237,243,231,0.22)_100%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(248,247,239,0.16)_0%,rgba(237,243,231,0.08)_52%,rgba(215,228,212,0.24)_100%)]" />
     </div>
   );
 }

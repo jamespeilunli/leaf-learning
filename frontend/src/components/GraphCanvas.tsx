@@ -17,6 +17,7 @@ import { useSessionStore } from '../store/useSessionStore'
 import type { GraphNode as AppGraphNode } from '../types'
 import { GrayedNode } from './GrayedNode'
 import { Phase2Node } from './Phase2Node'
+import { Button, Eyebrow, StatusNotice } from './ui'
 
 const nodeTypes = { phase2Node: Phase2Node, grayedNode: GrayedNode }
 const ACTIVE_NODE = { width: 320, height: 188 }
@@ -162,26 +163,36 @@ export function GraphCanvas() {
   const focusNode = session.focus_node_id ? session.nodes[session.focus_node_id] : null
 
   return (
-    <div ref={paneRef} className="h-screen w-full bg-[#eef1ec]">
-      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(24,33,45,0.045)_1px,transparent_1px),linear-gradient(180deg,rgba(24,33,45,0.045)_1px,transparent_1px)] bg-[size:34px_34px]" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_100%,rgba(191,91,44,0.18),transparent_34%),radial-gradient(circle_at_15%_10%,rgba(14,165,233,0.14),transparent_28%)]" />
+    <div ref={paneRef} className="h-screen w-full bg-[var(--panel)]">
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(23,33,23,0.05)_1px,transparent_1px),linear-gradient(180deg,rgba(23,33,23,0.05)_1px,transparent_1px)] bg-[size:34px_34px]" />
+      <div className="absolute inset-0 bg-[linear-gradient(145deg,rgba(183,95,49,0.12)_0%,rgba(237,241,236,0.38)_44%,rgba(36,117,141,0.13)_100%)]" />
       <div className="pointer-events-none absolute inset-x-0 top-4 z-10 flex items-start justify-between gap-4 px-4">
-        <button
+        <Button
           aria-label="Back to start"
-          className="pointer-events-auto inline-flex h-11 items-center gap-2 rounded-full border border-white/70 bg-white/90 px-4 text-sm font-semibold text-[var(--ink)] shadow-[0_14px_34px_rgba(15,23,42,0.14)] backdrop-blur transition hover:border-[var(--accent)] hover:text-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2"
+          className="pointer-events-auto rounded-full border-white/70 bg-white/90 shadow-[0_14px_34px_rgba(15,23,42,0.14)] backdrop-blur"
+          leftIcon={<ArrowLeft aria-hidden="true" className="h-4 w-4" />}
+          size="sm"
           title="Back to start"
           type="button"
+          variant="secondary"
           onClick={restartFlow}
         >
-          <ArrowLeft className="h-4 w-4" />
           Back
-        </button>
-        <div className="pointer-events-auto max-w-[min(520px,calc(100vw-7rem))] rounded-full border border-white/70 bg-white/80 px-4 py-2 text-right shadow-[0_14px_34px_rgba(15,23,42,0.10)] backdrop-blur">
+        </Button>
+        <div className="pointer-events-auto max-w-[min(520px,calc(100vw-7rem))] rounded-[var(--radius-sm)] border border-white/70 bg-white/84 px-4 py-2 text-right shadow-[0_14px_34px_rgba(15,23,42,0.10)] backdrop-blur">
+          <Eyebrow className="text-right">Roadmap focus</Eyebrow>
           <div className="truncate text-sm font-semibold text-[var(--ink)]">
             {focusNode?.label ?? session.root_topic}
           </div>
         </div>
       </div>
+      {!rfNodes.length ? (
+        <div className="pointer-events-none absolute inset-0 z-[5] grid place-items-center px-4">
+          <StatusNotice className="max-w-sm bg-white/84 text-center shadow-[var(--shadow-soft)]" tone="loading">
+            Laying out the roadmap...
+          </StatusNotice>
+        </div>
+      ) : null}
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}

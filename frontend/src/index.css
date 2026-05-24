@@ -1,19 +1,40 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #edf3e7;
-  --paper: #fbfaf5;
-  --panel: #eef2f6;
-  --ink: #163122;
-  --muted: #556558;
-  --muted-strong: #4f5f52;
-  --line: #cad8ca;
-  --accent: #5e7f5f;
-  --accent-soft: #dcead8;
+  --bg: #f0f2e8;
+  --bg-elevated: #f8f7ef;
+  --paper: #fffdf7;
+  --panel: #edf1ec;
+  --panel-strong: #dfe7dc;
+  --ink: #172117;
+  --ink-soft: #2a3b31;
+  --muted: #627064;
+  --muted-strong: #465846;
+  --line: #cad7c9;
+  --line-strong: #9fb29f;
+  --accent: #496e51;
+  --accent-strong: #244832;
+  --accent-soft: #deead9;
+  --amber: #b75f31;
+  --amber-soft: #f4dfcf;
+  --sky: #24758d;
+  --sky-soft: #dcecf0;
   --leaf: #6f9268;
   --leaf-deep: #274731;
   --leaf-soft: #e5efe0;
+  --success: #0f7a4f;
+  --success-soft: #e2f4e9;
   --danger: #b42318;
+  --danger-soft: #fde7e4;
+  --shadow-soft: 0 18px 48px rgba(23, 33, 23, 0.12);
+  --shadow-strong: 0 32px 90px rgba(23, 33, 23, 0.2);
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
+  --focus-ring: 0 0 0 3px rgba(73, 110, 81, 0.24);
   font-family: "Optima", "Avenir Next", "Segoe UI", sans-serif;
   color: var(--ink);
   background: var(--bg);
@@ -31,6 +52,12 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+}
+
+body {
+  background:
+    linear-gradient(135deg, rgba(255, 253, 247, 0.7), rgba(237, 241, 236, 0.82)),
+    var(--bg);
 }
 
 #root {
@@ -54,7 +81,31 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+}
+
 a {
   color: inherit;
   text-decoration: none;
+}
+
+::selection {
+  background: rgba(183, 95, 49, 0.22);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
