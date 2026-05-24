@@ -15,7 +15,7 @@ from app.phase2_prefetch import (
     prefetch_phase2_tree,
     reveal_direct_phase2_children,
 )
-from app.storage import load_session, save_session
+from app.storage import load_session, merge_save_session, save_session
 
 
 router = APIRouter()
@@ -66,8 +66,8 @@ async def _prefetch_descendants(session_id: str, start_node_ids: list[str], goal
             start_node = session.nodes.get(start_node_id)
             if not start_node:
                 continue
-            await prefetch_phase2_tree(session, start_node, goal_label, on_progress=save_session)
-        save_session(session)
+            await prefetch_phase2_tree(session, start_node, goal_label, on_progress=merge_save_session)
+        merge_save_session(session)
     except Exception:
         return
 
@@ -83,13 +83,13 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
     node.node_state = "expanded"
     node.phase = "2"
     node.is_visible = True
-    save_session(session)
+    merge_save_session(session)
     goal_label = _get_node(session, session.focus_node_id).label
 
     async def event_stream() -> Iterable[str]:
         if node.child_ids:
             revealed_nodes, revealed_edges = reveal_direct_phase2_children(session, node)
-            save_session(session)
+            merge_save_session(session)
             asyncio.create_task(
                 _prefetch_descendants(session.id, [child.id for child in revealed_nodes], goal_label)
             )
@@ -102,7 +102,7 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
             return
 
         if node.depth >= phase2_max_depth(session):
-            save_session(session)
+            merge_save_session(session)
             yield _sse("node_updated", node.model_dump(by_alias=True))
             yield _sse("stream_done", {})
             return
@@ -119,7 +119,7 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
                     node.resource = Resource.model_validate(data["resource"])
                     if not node.sources:
                         node.sources = [node.resource]
-                save_session(session)
+                merge_save_session(session)
                 yield _sse("node_updated", {"id": node.id, **data})
                 continue
 
@@ -134,7 +134,7 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
                 if child.id not in node.child_ids:
                     node.child_ids.append(child.id)
                 revealed_node_ids.append(child.id)
-                save_session(session)
+                merge_save_session(session)
                 yield _sse("node_added", child.model_dump(by_alias=True))
                 continue
 
@@ -142,11 +142,11 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
                 edge = GraphEdge.model_validate(data)
                 edge.from_id = node.id
                 session.edges.append(edge)
-                save_session(session)
+                merge_save_session(session)
                 yield _sse("edge_added", edge.model_dump(by_alias=True))
                 continue
 
-            save_session(session)
+            merge_save_session(session)
             yield _sse(event_name, data)
             if event_name in {"stream_done", "stream_error"}:
                 if event_name == "stream_done" and revealed_node_ids:
