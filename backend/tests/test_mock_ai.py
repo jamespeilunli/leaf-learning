@@ -19,21 +19,16 @@ class MockAITests(unittest.TestCase):
         self.assertNotIn("Generalization", labels)
         self.assertEqual(events[-1]["event"], "stream_done")
 
-    def test_phase2_generation_respects_resolution_and_known_topics(self) -> None:
-        intuitive = asyncio.run(
-            collect(expand_phase2_node("Representation Learning", "intuitive", ["loss functions"], "Representation Learning"))
-        )
-        technical = asyncio.run(
-            collect(expand_phase2_node("Representation Learning", "technical", [], "Representation Learning"))
+    def test_phase2_generation_returns_sources_and_respects_known_topics(self) -> None:
+        events = asyncio.run(
+            collect(expand_phase2_node("Representation Learning", ["loss functions"], "Representation Learning"))
         )
 
-        intuitive_update = next(event for event in intuitive if event["event"] == "node_updated")
-        technical_update = next(event for event in technical if event["event"] == "node_updated")
-        intuitive_labels = [event["data"]["label"] for event in intuitive if event["event"] == "node_added"]
+        node_update = next(event for event in events if event["event"] == "node_updated")
+        labels = [event["data"]["label"] for event in events if event["event"] == "node_added"]
 
-        self.assertLessEqual(intuitive_update["data"]["intuition_score"], 0.45)
-        self.assertGreaterEqual(technical_update["data"]["intuition_score"], 0.68)
-        self.assertNotIn("Loss Functions", intuitive_labels)
+        self.assertGreaterEqual(len(node_update["data"]["sources"]), 2)
+        self.assertNotIn("Loss Functions", labels)
 
     def test_chat_stream_is_deterministic_and_mentions_context(self) -> None:
         chunks = asyncio.run(
@@ -42,7 +37,6 @@ class MockAITests(unittest.TestCase):
                     "Vector Spaces",
                     "description",
                     "resource",
-                    "technical",
                     ["Representation Learning", "Vector Spaces"],
                     [],
                     "What is a basis?",
@@ -52,7 +46,7 @@ class MockAITests(unittest.TestCase):
 
         text = "".join(chunks)
         self.assertIn("Vector Spaces", text)
-        self.assertIn("technical", text)
+        self.assertIn("Representation Learning", text)
         self.assertIn("What is a basis?", text)
 
 
