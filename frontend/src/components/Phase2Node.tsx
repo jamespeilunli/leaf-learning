@@ -10,9 +10,7 @@ export function Phase2Node({ data }: NodeProps<{ node: GraphNode }>) {
   const streamingNodeIds = useSessionStore((state) => state.streamingNodeIds)
   const openNodeDetails = useSessionStore((state) => state.openNodeDetails)
   const isStreaming = streamingNodeIds.has(node.id)
-  const sources = node.sources?.length ? node.sources : node.resource ? [node.resource] : []
-  const visibleSources = sources.slice(0, 2)
-  const hiddenSourceCount = Math.max(0, sources.length - visibleSources.length)
+  const primarySource = node.sources?.[0] ?? node.resource
   const isLearned = node.node_state === 'learned'
 
   return (
@@ -49,25 +47,17 @@ export function Phase2Node({ data }: NodeProps<{ node: GraphNode }>) {
       ) : null}
 
       <div className="mt-4 min-w-0 overflow-hidden border-t border-dashed border-slate-300 pt-3">
-        {sources.length ? (
+        {primarySource ? (
           <ul className="min-w-0 space-y-1.5 overflow-hidden">
-            {visibleSources.map((source) => (
-              <li
-                key={source.url}
-                className="flex min-w-0 items-center gap-2 text-[12px] font-semibold text-slate-700"
-                title={source.title}
-              >
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" />
-                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
-                  {source.title}
-                </span>
-              </li>
-            ))}
-            {hiddenSourceCount ? (
-              <li className="pl-3.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-strong)]">
-                +{hiddenSourceCount} more
-              </li>
-            ) : null}
+            <li
+              className="flex min-w-0 items-center gap-2 text-[12px] font-semibold text-slate-700"
+              title={primarySource.title}
+            >
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" />
+              <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                {primarySource.title}
+              </span>
+            </li>
           </ul>
         ) : (
           <div className="space-y-2">

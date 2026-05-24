@@ -133,8 +133,7 @@ class ApiFlowTests(unittest.TestCase):
 
         self.assertEqual(self.client.post(f"/api/session/{session_id}/node/{child_id}/expand").status_code, 400)
         self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id})
-        self.assertEqual(self.client.post(f"/api/session/{session_id}/node/{child_id}/expand").status_code, 400)
-        self.client.post(f"/api/session/{session_id}/resolution", json={"resolution": "technical"})
+        self.assertEqual(self.client.post(f"/api/session/{session_id}/node/{child_id}/expand").status_code, 200)
         self.assertEqual(self.client.post(f"/api/session/{session_id}/node/{child_id}/explain").status_code, 400)
 
     def test_chat_streams_tokens_and_persists_bounded_history(self) -> None:

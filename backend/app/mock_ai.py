@@ -189,6 +189,52 @@ DEEP_DIVE_FIXTURES: dict[str, dict[str, object]] = {
             ("Difficulty Curves", "Difficulty curves control how challenge changes as player skill grows."),
         ],
     },
+    "localization": {
+        "sources": [
+            {
+                "url": "https://example.com/mock/localization-solvers",
+                "title": "Implementing Analytical and Iterative Localization Solvers",
+                "description": "A mock non-paywalled implementation article that compares closed-form range localization with iterative nonlinear least squares using residuals, Jacobians, update steps, and convergence checks.",
+            },
+        ],
+        "prerequisites": [
+            (
+                "Analytical Localization Solve",
+                "Analytical localization solve is needed for localization because it shows when position can be recovered directly from measurement equations before using numerical refinement.",
+            ),
+            (
+                "Iterative Localization Solve",
+                "Iterative localization solve is needed for localization because noisy nonlinear measurements usually require repeated updates to minimize position error.",
+            ),
+            (
+                "Range Measurement Residuals",
+                "Range measurement residuals are needed for localization because both analytical and iterative solvers express position error as differences between predicted and observed distances.",
+            ),
+        ],
+    },
+    "iterative localization solve": {
+        "sources": [
+            {
+                "url": "https://example.com/mock/iterative-localization-gauss-newton",
+                "title": "Implementing Gauss-Newton for Iterative Localization",
+                "description": "A mock non-paywalled technical article that implements iterative localization by forming residuals, linearizing them with a Jacobian, solving an update system, applying pose updates with matrix exponentials, and stopping on convergence.",
+            },
+        ],
+        "prerequisites": [
+            (
+                "Residual Vector Construction",
+                "Residual vector construction is needed for iterative localization solve because each update minimizes the stacked mismatch between predicted and observed measurements.",
+            ),
+            (
+                "Jacobian Linearization",
+                "Jacobian linearization is needed for iterative localization solve because the solver approximates how residuals change for a small pose update.",
+            ),
+            (
+                "Taking e to the Power of a Matrix",
+                "Taking e to the power of a matrix is needed for iterative localization solve because pose updates can use the matrix exponential to map a local incremental motion into a valid transformation.",
+            ),
+        ],
+    },
 }
 
 
@@ -238,10 +284,22 @@ async def generate_phase1_children(
 
 def _generic_deep_dive(node_label: str) -> dict[str, object]:
     concepts = [
-        ("Key Vocabulary", f"Key vocabulary defines the terms used by resources about {node_label}."),
-        ("Worked Examples", f"Worked examples show how {node_label} appears in concrete situations."),
-        ("Common Failure Modes", f"Common failure modes explain where misunderstandings around {node_label} usually happen."),
-        ("Measurement Criteria", f"Measurement criteria describe how progress or quality is judged for {node_label}."),
+        (
+            f"Derive the {node_label} Update Rule",
+            f"Deriving the {node_label} update rule is needed for {node_label} because the learner must see which quantities change and why each step is valid.",
+        ),
+        (
+            f"Implement a Minimal {node_label} Procedure",
+            f"Implementing a minimal {node_label} procedure is needed for {node_label} because it turns the mechanism into executable steps with inputs, outputs, and stopping conditions.",
+        ),
+        (
+            f"Validate {node_label} Failure Cases",
+            f"Validating {node_label} failure cases is needed for {node_label} because the learner must recognize when the method's assumptions break and the result cannot be trusted.",
+        ),
+        (
+            f"Choose {node_label} Model Parameters",
+            f"Choosing {node_label} model parameters is needed for {node_label} because the method's behavior depends on concrete thresholds, dimensions, or update settings.",
+        ),
     ]
     start = _stable_index(node_label, len(concepts))
     prerequisites = [concepts[(start + offset) % len(concepts)] for offset in range(3)]
@@ -250,12 +308,7 @@ def _generic_deep_dive(node_label: str) -> dict[str, object]:
             {
                 "url": f"https://example.com/mock/{_key(node_label).replace(' ', '-')}",
                 "title": f"Mock Deep Dive: {node_label}",
-                "description": f"A deterministic technical test resource for {node_label}, including examples, assumptions, and follow-on prerequisites.",
-            },
-            {
-                "url": f"https://example.com/mock/{_key(node_label).replace(' ', '-')}-reference",
-                "title": f"Technical Reference: {node_label}",
-                "description": f"A secondary mock reference for definitions, assumptions, and terminology around {node_label}.",
+                "description": f"A deterministic non-paywalled technical test resource for implementing {node_label}, including update steps, assumptions, parameters, failure checks, and a concrete endpoint.",
             },
         ],
         "prerequisites": prerequisites,
@@ -264,15 +317,10 @@ def _generic_deep_dive(node_label: str) -> dict[str, object]:
 
 def _fixture_sources(fixture: dict[str, object], node_label: str) -> list[Resource]:
     if "sources" in fixture:
-        return [Resource.model_validate(item) for item in fixture["sources"]]  # type: ignore[index]
+        return [Resource.model_validate(fixture["sources"][0])]  # type: ignore[index]
 
     primary = Resource.model_validate(fixture["resource"])
-    companion = Resource(
-        url=f"https://example.com/mock/{_key(node_label).replace(' ', '-')}-companion",
-        title=f"Companion Notes: {node_label}",
-        description=f"A short companion reference with technical definitions and assumptions for {node_label}.",
-    )
-    return [primary, companion]
+    return [primary]
 
 
 async def expand_phase2_node(

@@ -19,21 +19,41 @@ class MockAITests(unittest.TestCase):
         self.assertNotIn("Generalization", labels)
         self.assertEqual(events[-1]["event"], "stream_done")
 
-    def test_phase2_generation_respects_resolution_and_known_topics(self) -> None:
-        intuitive = asyncio.run(
-            collect(expand_phase2_node("Representation Learning", "intuitive", ["loss functions"], "Representation Learning"))
+    def test_phase2_generation_respects_known_topics(self) -> None:
+        events = asyncio.run(
+            collect(expand_phase2_node("Representation Learning", ["loss functions"], "Representation Learning"))
         )
-        technical = asyncio.run(
-            collect(expand_phase2_node("Representation Learning", "technical", [], "Representation Learning"))
+        update = next(event for event in events if event["event"] == "node_updated")
+        labels = [event["data"]["label"] for event in events if event["event"] == "node_added"]
+
+        self.assertEqual(len(update["data"]["sources"]), 1)
+        self.assertIn("Vector Spaces", labels)
+        self.assertNotIn("Loss Functions", labels)
+
+    def test_localization_deep_dive_uses_actionable_solver_routes(self) -> None:
+        events = asyncio.run(collect(expand_phase2_node("Localization", [], "Localization")))
+        update = next(event for event in events if event["event"] == "node_updated")
+        labels = [event["data"]["label"] for event in events if event["event"] == "node_added"]
+        hints = [event["data"]["description"] for event in events if event["event"] == "node_added"]
+
+        self.assertEqual(len(update["data"]["sources"]), 1)
+        self.assertIn("non-paywalled", update["data"]["sources"][0]["description"])
+        self.assertIn("Analytical Localization Solve", labels)
+        self.assertIn("Iterative Localization Solve", labels)
+        self.assertTrue(any("because" in hint and "localization" in hint.lower() for hint in hints))
+        self.assertNotIn("Image Recognition", labels)
+        self.assertNotIn("Image Analysis", labels)
+
+    def test_iterative_localization_expansion_surfaces_specific_mechanics(self) -> None:
+        events = asyncio.run(
+            collect(expand_phase2_node("Iterative Localization Solve", [], "Localization"))
         )
+        update = next(event for event in events if event["event"] == "node_updated")
+        labels = [event["data"]["label"] for event in events if event["event"] == "node_added"]
 
-        intuitive_update = next(event for event in intuitive if event["event"] == "node_updated")
-        technical_update = next(event for event in technical if event["event"] == "node_updated")
-        intuitive_labels = [event["data"]["label"] for event in intuitive if event["event"] == "node_added"]
-
-        self.assertLessEqual(intuitive_update["data"]["intuition_score"], 0.45)
-        self.assertGreaterEqual(technical_update["data"]["intuition_score"], 0.68)
-        self.assertNotIn("Loss Functions", intuitive_labels)
+        self.assertEqual(len(update["data"]["sources"]), 1)
+        self.assertIn("Taking e to the Power of a Matrix", labels)
+        self.assertIn("Jacobian Linearization", labels)
 
     def test_chat_stream_is_deterministic_and_mentions_context(self) -> None:
         chunks = asyncio.run(
@@ -42,7 +62,6 @@ class MockAITests(unittest.TestCase):
                     "Vector Spaces",
                     "description",
                     "resource",
-                    "technical",
                     ["Representation Learning", "Vector Spaces"],
                     [],
                     "What is a basis?",
@@ -52,7 +71,7 @@ class MockAITests(unittest.TestCase):
 
         text = "".join(chunks)
         self.assertIn("Vector Spaces", text)
-        self.assertIn("technical", text)
+        self.assertIn("Representation Learning > Vector Spaces", text)
         self.assertIn("What is a basis?", text)
 
 

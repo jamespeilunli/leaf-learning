@@ -22,7 +22,7 @@ export function Phase2Sidebar() {
 
   if (!session || !node || node.node_state === 'grayed') return null
 
-  const sources = node.sources?.length ? node.sources : node.resource ? [node.resource] : []
+  const primarySource = node.sources?.[0] ?? node.resource
   const isLearned = node.node_state === 'learned'
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -77,26 +77,23 @@ export function Phase2Sidebar() {
       <div className="flex-1 overflow-y-auto px-5 py-5">
         <section>
           <div className="flex items-center justify-between">
-            <h3 className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Sources</h3>
-            <span className="text-xs font-semibold text-slate-400">{sources.length}</span>
+            <h3 className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Source</h3>
+            <span className="text-xs font-semibold text-slate-400">{primarySource ? 1 : 0}</span>
           </div>
           <div className="mt-3 space-y-3">
-            {sources.length ? (
-              sources.map((source) => (
-                <a
-                  key={source.url}
-                  className="block rounded-[8px] border border-slate-200 bg-white p-4 transition hover:border-[var(--accent)] hover:shadow-[0_12px_28px_rgba(15,23,42,0.10)]"
-                  href={source.url}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="text-sm font-bold leading-5 text-[var(--ink)]">{source.title}</div>
-                    <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
-                  </div>
-                  <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{source.description}</p>
-                </a>
-              ))
+            {primarySource ? (
+              <a
+                className="block rounded-[8px] border border-slate-200 bg-white p-4 transition hover:border-[var(--accent)] hover:shadow-[0_12px_28px_rgba(15,23,42,0.10)]"
+                href={primarySource.url}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="text-sm font-bold leading-5 text-[var(--ink)]">{primarySource.title}</div>
+                  <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
+                </div>
+                <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{primarySource.description}</p>
+              </a>
             ) : (
               <div className="rounded-[8px] border border-dashed border-slate-300 bg-white/60 p-4 text-sm leading-6 text-[var(--muted)]">
                 Sources are loading for this node.

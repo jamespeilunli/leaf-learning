@@ -129,35 +129,7 @@ async def expand_phase2_node(
             yield event
         return
 
-    instructions = f"""
-You are a learning roadmap assistant. The user's goal is to understand "{goal_label}".
-Explain topics at a technical level with formal, precise, mechanism-focused detail.
-
-Search for and read the best resources that genuinely explain "{node_label}" at this technical level.
-The resources must explain the topic in depth, not just introduce it.
-
-Return ONLY a JSON object with this exact shape:
-{{
-  "sources": [
-    {{
-      "url": "string",
-      "title": "string",
-      "description": "string (1–2 sentences on exactly what this resource covers and why it's useful)"
-    }}
-  ],
-  "prerequisites": [
-    {{
-      "label": "string",
-      "hint": "string (1 sentence: what this prerequisite is and why the resource uses it)"
-    }}
-  ]
-}}
-
-sources must contain 2 to 4 high-quality technical resources.
-prerequisites must be topics directly used or assumed by these resources — not general background.
-Do NOT include any of these topics as prerequisites, the user already knows them: {known_topics}
-Return ONLY the JSON object. No prose, no markdown fences.
-""".strip()
+    instructions = _build_phase2_instructions(node_label, known_topics, goal_label)
 
     try:
         response = await get_client().responses.create(
@@ -168,12 +140,14 @@ Return ONLY the JSON object. No prose, no markdown fences.
         )
         payload = _loads_json_object(_extract_response_text(response))
 
-        raw_sources = payload.get("sources") or [payload["resource"]]
-        sources = [Resource.model_validate(item) for item in raw_sources[:4]]
+        raw_source = payload.get("source") or payload.get("resource")
+        if raw_source is None and payload.get("sources"):
+            raw_source = payload["sources"][0]
+        source = Resource.model_validate(raw_source)
         yield {
             "event": "node_updated",
             "data": {
-                "sources": [source.model_dump() for source in sources],
+                "sources": [source.model_dump()],
             },
         }
 
@@ -191,6 +165,63 @@ Return ONLY the JSON object. No prose, no markdown fences.
         yield {"event": "stream_done", "data": {}}
     except Exception as exc:
         yield {"event": "stream_error", "data": {"message": str(exc)}}
+
+
+def _build_phase2_instructions(node_label: str, known_topics: list[str], goal_label: str) -> str:
+    return f"""
+You are a learning roadmap assistant. The user's goal is to understand "{goal_label}".
+Explain topics at a technical level with formal, precise, mechanism-focused detail.
+
+Search for and read the single best source that genuinely explains "{node_label}" at this technical level.
+The source must explain how to do or derive something concrete, not just introduce or define the topic.
+It must be freely accessible without a paywall, login wall, subscription, trial signup, institutional access,
+or hidden full text. If the best-looking result is paywalled, reject it and choose the best non-paywalled source.
+After choosing the source, scan the actual source content and derive prerequisites from what it uses or assumes.
+
+Build a finite dependency roadmap for "{node_label}".
+Each child node must be necessary for understanding the node immediately before it in the graph.
+For every prerequisite hint, explicitly state how that prerequisite is used by "{node_label}".
+Prefer actionable technique, derivation, implementation, or decision nodes over broad category labels.
+
+If "{node_label}" is broad, split it into concrete routes or methods that a learner can execute.
+Example: for "localization", useful child nodes include "analytical localization solve" and
+"iterative localization solve"; the iterative route should point to a source about implementing an
+iterative solver, and its later expansion should surface specific mechanics such as matrix exponentials
+when the resource actually uses them.
+
+Bad generic chains: "facial recognition" -> "image recognition" -> "object detection" -> "image analysis".
+Do not produce near-synonyms, parent restatements, vague background buckets, or domain umbrellas.
+Forbidden labels include: "Introduction", "Overview", "Basics", "Foundations", "Key Vocabulary",
+"Worked Examples", "Applications", "Image Recognition", "Image Analysis", and any label that simply
+rephrases "{node_label}".
+
+Return ONLY a JSON object with this exact shape:
+{{
+  "sources": [
+    {{
+      "url": "string",
+      "title": "string",
+      "description": "string (1–2 sentences on exactly what this resource covers and why it's useful)"
+    }}
+  ],
+  "prerequisites": [
+    {{
+      "label": "string",
+      "hint": "string (1 sentence: what this prerequisite is and exactly how {node_label} uses it)"
+    }}
+  ]
+}}
+
+sources must contain exactly 1 high-quality, non-paywalled technical source: the one you think will work best.
+The source description must say what concrete method, derivation, or implementation the source teaches.
+Do not include paywalled abstracts, purchase pages, previews, snippets, or sources whose technical body you cannot access.
+If you include a method node, the single source must directly teach that method.
+prerequisites must be topics directly used or assumed by the selected source — not general background.
+Return 3 to 6 prerequisites unless fewer are genuinely needed.
+Stop at a learnable endpoint: do not create an endless stream of restatements at different abstraction levels.
+Do NOT include any of these topics as prerequisites, the user already knows them: {known_topics}
+Return ONLY the JSON object. No prose, no markdown fences.
+""".strip()
 
 
 async def explain_prerequisite(
