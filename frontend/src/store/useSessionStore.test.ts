@@ -249,6 +249,60 @@ describe('useSessionStore', () => {
     expect(updated.nodes.goal.node_state).toBe('expanded')
   })
 
+  it('extends only the clicked phase 2 branch when a deeper node streams new children', async () => {
+    const session = makePhase2Session({
+      nodes: {
+        goal: makeNode({
+          id: 'goal',
+          label: 'Representation Learning',
+          phase: '2',
+          node_state: 'expanded',
+          child_ids: ['branch', 'sibling'],
+        }),
+        branch: makeNode({
+          id: 'branch',
+          label: 'Vector Spaces',
+          phase: '2',
+          node_state: 'grayed',
+          parent_id: 'goal',
+          depth: 2,
+          child_ids: [],
+        }),
+        sibling: makeNode({
+          id: 'sibling',
+          label: 'Optimization',
+          phase: '2',
+          node_state: 'grayed',
+          parent_id: 'goal',
+          depth: 2,
+          child_ids: [],
+        }),
+      },
+      edges: [],
+    })
+    const nextLayer = makeNode({
+      id: 'basis',
+      label: 'Basis Vectors',
+      phase: '2',
+      node_state: 'grayed',
+      parent_id: 'branch',
+      depth: 3,
+    })
+    useSessionStore.setState({ sessionId: 'session-1', session })
+    mockedStreamSSE.mockImplementation(async function* () {
+      yield { event: 'node_added', data: nextLayer }
+      yield { event: 'stream_done', data: {} }
+    })
+
+    await getState().expandNode('branch')
+
+    const updated = getState().session as Session
+    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/branch/expand', {})
+    expect(updated.nodes.branch.child_ids).toEqual(['basis'])
+    expect(updated.nodes.sibling.child_ids).toEqual([])
+    expect(updated.nodes.basis.depth).toBe(3)
+  })
+
   it('explains grayed nodes, marks learned duplicates, and prunes subtrees', async () => {
     const session = makePhase2Session()
     useSessionStore.setState({ sessionId: 'session-1', session })

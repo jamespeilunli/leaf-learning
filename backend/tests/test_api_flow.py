@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from collections.abc import AsyncIterator
 from unittest.mock import patch
 
 from app.ai import using_mock_ai
@@ -244,6 +245,60 @@ class ApiFlowTests(unittest.TestCase):
 
         self.assertTrue(any("mode=preemptive" in message for message in logs.output))
         self.assertTrue(any(f"session_id={stored.id}" in message for message in logs.output))
+
+    def test_deeper_phase2_nodes_expand_beyond_initial_prefetch_depth(self) -> None:
+        session_id, session = self.create_machine_learning_session()
+        root_id = session["current_phase1_node_id"]
+        child_id = session["nodes"][root_id]["child_ids"][0]
+        self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id})
+
+        stored = load_session(session_id)
+        focus = stored.nodes[child_id]
+        parent = focus
+        for index in range(3):
+            node = GraphNode(
+                label=f"Deep branch {index}",
+                description="Existing preemptive branch.",
+                phase="2",
+                node_state="expanded" if index < 2 else "grayed",
+                parent_id=parent.id,
+                depth=parent.depth + 1,
+                is_visible=True,
+            )
+            stored.nodes[node.id] = node
+            parent.child_ids.append(node.id)
+            stored.edges.append(GraphEdge(from_id=parent.id, to_id=node.id, label="requires"))
+            parent = node
+        deep_node_id = parent.id
+        save_session(stored)
+
+        async def fake_expand_phase2_node(*args, **kwargs) -> AsyncIterator[dict]:
+            child = GraphNode(
+                label="Beyond Initial Depth",
+                description="Generated after clicking a deeper branch.",
+                phase="2",
+            )
+            yield {"event": "node_added", "data": child.model_dump(by_alias=True)}
+            yield {
+                "event": "edge_added",
+                "data": GraphEdge(from_id=deep_node_id, to_id=child.id, label="requires").model_dump(by_alias=True),
+            }
+            yield {"event": "stream_done", "data": {}}
+
+        async def noop_prefetch(*args, **kwargs) -> None:
+            return None
+
+        with (
+            patch("app.routers.graph.expand_phase2_node", side_effect=fake_expand_phase2_node),
+            patch("app.routers.graph._prefetch_descendants", side_effect=noop_prefetch),
+        ):
+            expand_response = self.client.post(f"/api/session/{session_id}/node/{deep_node_id}/expand")
+
+        events = parse_sse(expand_response.text)
+        self.assertEqual(expand_response.status_code, 200)
+        self.assertIn("node_added", [name for name, _ in events])
+        expanded = self.client.get(f"/api/session/{session_id}").json()
+        self.assertGreater(max(node["depth"] for node in expanded["nodes"].values() if node["phase"] == "2"), 2)
 
     def test_phase2_expand_explain_learned_dedupe_and_prune(self) -> None:
         session_id, session = self.create_machine_learning_session()

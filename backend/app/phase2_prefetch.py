@@ -9,7 +9,9 @@ from app.ai import expand_phase2_node
 from app.models import GraphEdge, GraphNode, Resource, Session
 
 
-PHASE2_MAX_DEPTH_FROM_FOCUS = 2
+PHASE2_INITIAL_PREFETCH_LAYERS = 2
+PHASE2_INCREMENTAL_PREFETCH_LAYERS = 1
+PHASE2_MAX_DEPTH_FROM_FOCUS = PHASE2_INITIAL_PREFETCH_LAYERS
 PHASE2_MAX_DEPTH_ENV = "ALPHAG3N_PHASE2_MAX_DEPTH"
 logger = logging.getLogger(__name__)
 
@@ -124,9 +126,11 @@ async def prefetch_phase2_tree(
     start_node: GraphNode,
     goal_label: str,
     on_progress: Callable[[Session], None] | None = None,
+    max_layers_from_start: int | None = None,
 ) -> None:
-    """Generate hidden Phase 2 descendants breadth-first up to the focus-relative cap."""
-    max_depth = phase2_max_depth(session)
+    """Generate hidden Phase 2 descendants breadth-first within a start-relative layer budget."""
+    layer_budget = phase2_max_depth_from_focus() if max_layers_from_start is None else max_layers_from_start
+    max_depth = start_node.depth + max(0, layer_budget)
     queue: deque[str] = deque([start_node.id])
     visited: set[str] = set()
 
@@ -211,7 +215,7 @@ async def prefetch_child_layers(
     goal_label: str,
     on_progress: Callable[[Session], None] | None = None,
 ) -> None:
-    max_depth = phase2_max_depth(session)
+    max_depth = node.depth + PHASE2_INCREMENTAL_PREFETCH_LAYERS
 
     for child_id in node.child_ids:
         child = session.nodes.get(child_id)

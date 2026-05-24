@@ -12,8 +12,8 @@ from pydantic import BaseModel
 from app.ai import expand_phase2_node, explain_prerequisite, suggest_prerequisite
 from app.models import GraphEdge, GraphNode, Resource, Session
 from app.phase2_prefetch import (
+    PHASE2_INCREMENTAL_PREFETCH_LAYERS,
     adopt_prefetched_children_by_label,
-    phase2_max_depth,
     prefetch_phase2_tree,
     reveal_direct_phase2_children,
 )
@@ -69,7 +69,13 @@ async def _prefetch_descendants(session_id: str, start_node_ids: list[str], goal
             start_node = session.nodes.get(start_node_id)
             if not start_node:
                 continue
-            await prefetch_phase2_tree(session, start_node, goal_label, on_progress=merge_save_session)
+            await prefetch_phase2_tree(
+                session,
+                start_node,
+                goal_label,
+                on_progress=merge_save_session,
+                max_layers_from_start=PHASE2_INCREMENTAL_PREFETCH_LAYERS,
+            )
         merge_save_session(session)
     except Exception:
         return
@@ -110,12 +116,6 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
                 yield _sse("node_added", child.model_dump(by_alias=True))
             for edge in revealed_edges:
                 yield _sse("edge_added", edge.model_dump(by_alias=True))
-            yield _sse("stream_done", {})
-            return
-
-        if node.depth >= phase2_max_depth(session):
-            merge_save_session(session)
-            yield _sse("node_updated", node.model_dump(by_alias=True))
             yield _sse("stream_done", {})
             return
 
