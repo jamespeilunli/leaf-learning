@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type ELKConstructor from 'elkjs/lib/elk.bundled.js'
 
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, RotateCcw } from 'lucide-react'
 import ReactFlow, {
   Background,
   Controls,
@@ -151,6 +151,7 @@ function decorateNodesForLayoutMotion(
 
 export function GraphCanvas() {
   const session = useSessionStore((state) => state.session)
+  const showPhase1 = useSessionStore((state) => state.showPhase1)
   const restartFlow = useSessionStore((state) => state.restartFlow)
   const reactFlow = useReactFlow()
   const paneRef = useRef<HTMLDivElement | null>(null)
@@ -317,18 +318,32 @@ export function GraphCanvas() {
       <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(23,33,23,0.05)_1px,transparent_1px),linear-gradient(180deg,rgba(23,33,23,0.05)_1px,transparent_1px)] bg-[size:34px_34px]" />
       <div className="absolute inset-0 bg-[linear-gradient(145deg,rgba(183,95,49,0.12)_0%,rgba(237,241,236,0.38)_44%,rgba(36,117,141,0.13)_100%)]" />
       <div className="pointer-events-none absolute inset-x-0 top-4 z-10 flex items-start justify-between gap-4 px-4">
-        <Button
-          aria-label="Back to start"
-          className="pointer-events-auto rounded-full border-white/70 bg-white/90 shadow-[0_14px_34px_rgba(15,23,42,0.14)] backdrop-blur"
-          leftIcon={<ArrowLeft aria-hidden="true" className="h-4 w-4" />}
-          size="sm"
-          title="Back to start"
-          type="button"
-          variant="secondary"
-          onClick={restartFlow}
-        >
-          Back
-        </Button>
+        <div className="pointer-events-auto flex items-center gap-2">
+          <Button
+            aria-label="Back to phase 1"
+            className="rounded-full border-white/70 bg-white/90 shadow-[0_14px_34px_rgba(15,23,42,0.14)] backdrop-blur"
+            leftIcon={<ArrowLeft aria-hidden="true" className="h-4 w-4" />}
+            size="sm"
+            title="Back to phase 1"
+            type="button"
+            variant="secondary"
+            onClick={showPhase1}
+          >
+            Back
+          </Button>
+          <Button
+            aria-label="Clear cache"
+            className="rounded-full border-white/70 bg-white/90 shadow-[0_14px_34px_rgba(15,23,42,0.14)] backdrop-blur"
+            leftIcon={<RotateCcw aria-hidden="true" className="h-4 w-4" />}
+            size="sm"
+            title="Clear cache"
+            type="button"
+            variant="secondary"
+            onClick={() => void restartFlow()}
+          >
+            Clear cache
+          </Button>
+        </div>
         <div className="pointer-events-auto max-w-[min(520px,calc(100vw-7rem))] rounded-[var(--radius-sm)] border border-white/70 bg-white/84 px-4 py-2 text-right shadow-[0_14px_34px_rgba(15,23,42,0.10)] backdrop-blur">
           <Eyebrow className="text-right">Roadmap focus</Eyebrow>
           <div className="truncate text-sm font-semibold text-[var(--ink)]">

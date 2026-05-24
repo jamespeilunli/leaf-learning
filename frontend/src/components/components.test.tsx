@@ -5,6 +5,7 @@ import type { ComponentType, ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '../lib/api'
+import * as browserData from '../lib/browserData'
 import { streamSSE } from '../hooks/useSSE'
 import { GraphCanvas } from './GraphCanvas'
 import { GrayedNode } from './GrayedNode'
@@ -98,6 +99,12 @@ vi.mock('../lib/api')
 vi.mock('../hooks/useSSE', () => ({
   streamSSE: vi.fn(),
 }))
+vi.mock('../lib/browserData', () => ({
+  clearBrowserData: vi.fn().mockImplementation(async () => {
+    localStorage.clear()
+    sessionStorage.clear()
+  }),
+}))
 vi.mock('lucide-react', async () => {
   const actual = await vi.importActual<typeof import('lucide-react')>('lucide-react')
   return {
@@ -108,9 +115,14 @@ vi.mock('lucide-react', async () => {
 
 const mockedApi = vi.mocked(api)
 const mockedStreamSSE = vi.mocked(streamSSE)
+const mockedClearBrowserData = vi.mocked(browserData.clearBrowserData)
 
 function setStoreSession(session: Session, sessionId = 'session-1') {
-  useSessionStore.setState({ sessionId, session })
+  useSessionStore.setState({
+    sessionId,
+    session,
+    activeView: session.phase === '2' ? 'phase2' : 'phase1',
+  })
 }
 
 function nodeProps(id: string) {
@@ -161,6 +173,21 @@ describe('frontend components', () => {
     expect(mockedApi.getSession).toHaveBeenCalledWith('old-session')
   })
 
+  it('StartScreen exposes a clear cache action', async () => {
+    const user = userEvent.setup()
+    mockedApi.listSessions.mockResolvedValue([])
+    mockedApi.clearSessions.mockResolvedValue({ deleted_count: 1 })
+    setStoreSession(makeSession())
+    localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
+
+    render(<StartScreen />)
+
+    await user.click(screen.getByRole('button', { name: 'Clear cache' }))
+
+    await waitFor(() => expect(mockedClearBrowserData).toHaveBeenCalledTimes(1))
+    expect(useSessionStore.getState().session).toBeNull()
+  })
+
   it('Phase1OptionCard displays subtopic context and selects the node', async () => {
     const user = userEvent.setup()
     const onSelect = vi.fn()
@@ -203,6 +230,22 @@ describe('frontend components', () => {
     await user.click(screen.getByRole('button', { name: /Optimization/i }))
     await user.click(screen.getByRole('button', { name: 'Expand' }))
     expect(mockedApi.expandPhase1Topic).toHaveBeenCalledWith('session-1', 'child-b')
+  })
+
+  it('Phase1View back button returns to the home screen without clearing cache', async () => {
+    const user = userEvent.setup()
+    setStoreSession(makeSession())
+    localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
+
+    render(<Phase1View />)
+
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+
+    expect(mockedApi.clearSessions).not.toHaveBeenCalled()
+    expect(mockedClearBrowserData).not.toHaveBeenCalled()
+    expect(useSessionStore.getState().activeView).toBe('home')
+    expect(useSessionStore.getState().session).toBeNull()
+    expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
   })
 
   it('DeepDiveButton starts the roadmap from the selected node', async () => {
@@ -341,7 +384,7 @@ describe('frontend components', () => {
     expect(node).toHaveClass('roadmap-node--inactive-enter')
   })
 
-  it('GraphCanvas renders the Phase 2 graph chrome and Back control', async () => {
+  it('GraphCanvas renders the Phase 2 graph chrome, back control, and clear-cache control', async () => {
     const user = userEvent.setup()
     const session = makePhase2Session()
     session.nodes.hidden = makeNode({
@@ -357,6 +400,7 @@ describe('frontend components', () => {
     session.edges.push({ id: 'edge-hidden', from: 'prereq', to: 'hidden', label: 'requires' })
     setStoreSession(session)
     localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
+    mockedApi.clearSessions.mockResolvedValue({ deleted_count: 1 })
 
     render(<GraphCanvas />)
 
@@ -364,8 +408,14 @@ describe('frontend components', () => {
     expect(screen.getByTestId('react-flow')).toHaveAttribute('data-edges', '1')
     expect(screen.getAllByText('Representation Learning').length).toBeGreaterThan(0)
     expect(screen.queryByText('Hidden Fundamental')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back to phase 1' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Back to start' }))
+    await user.click(screen.getByRole('button', { name: 'Back to phase 1' }))
+    expect(useSessionStore.getState().activeView).toBe('phase1')
+    expect(useSessionStore.getState().session).toEqual(session)
+
+    await user.click(screen.getByRole('button', { name: 'Clear cache' }))
+    await waitFor(() => expect(mockedClearBrowserData).toHaveBeenCalledTimes(1))
     expect(useSessionStore.getState().session).toBeNull()
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
   })

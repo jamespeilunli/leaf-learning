@@ -12,6 +12,7 @@ import { SESSION_STORAGE_KEY, useSessionStore } from './store/useSessionStore'
 
 function App() {
   const session = useSessionStore((state) => state.session)
+  const activeView = useSessionStore((state) => state.activeView)
   const isLoading = useSessionStore((state) => state.isLoading)
   const loadSession = useSessionStore((state) => state.loadSession)
 
@@ -26,11 +27,11 @@ function App() {
     })
   }, [loadSession])
 
-  if (!session) {
+  if (!session || activeView === 'home') {
     return <StartScreen key={isLoading ? 'loading' : 'start'} />
   }
 
-  if (session.phase === '1') {
+  if (activeView === 'phase1') {
     return <Phase1View />
   }
 

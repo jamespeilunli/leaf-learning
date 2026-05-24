@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { ArrowRight, Clock3, Leaf, Loader2 } from 'lucide-react'
+import { ArrowRight, Clock3, Leaf, Loader2, RotateCcw } from 'lucide-react'
 
 import { listSessions } from '../lib/api'
 import { useSessionStore } from '../store/useSessionStore'
@@ -13,6 +13,7 @@ type SessionRow = { id: string; root_topic: string; created_at: string; phase: P
 export function StartScreen() {
   const initSession = useSessionStore((state) => state.initSession)
   const loadSession = useSessionStore((state) => state.loadSession)
+  const restartFlow = useSessionStore((state) => state.restartFlow)
   const isLoading = useSessionStore((state) => state.isLoading)
   const error = useSessionStore((state) => state.error)
   const [topic, setTopic] = useState('')
@@ -67,12 +68,30 @@ export function StartScreen() {
               </div>
             </div>
           </div>
-          {isLoading ? (
-            <div className="inline-flex items-center gap-2 rounded-[var(--radius-sm)] border border-white/70 bg-white/70 px-3 py-2 text-sm font-semibold text-[var(--muted-strong)] shadow-sm backdrop-blur">
-              <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
-              Working
-            </div>
-          ) : null}
+          <div className="flex items-center gap-2">
+            {isLoading ? (
+              <div className="inline-flex items-center gap-2 rounded-[var(--radius-sm)] border border-white/70 bg-white/70 px-3 py-2 text-sm font-semibold text-[var(--muted-strong)] shadow-sm backdrop-blur">
+                <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                Working
+              </div>
+            ) : null}
+            <Button
+              className="border-white/75 bg-white/76 backdrop-blur"
+              leftIcon={<RotateCcw aria-hidden="true" className="h-4 w-4" />}
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                void restartFlow().then((cleared) => {
+                  if (cleared) {
+                    setSessions([])
+                    setSessionListError(false)
+                  }
+                })
+              }}
+            >
+              Clear cache
+            </Button>
+          </div>
         </header>
 
         <section className="flex flex-1 items-start justify-center px-1 pb-6 pt-9 sm:pb-8 sm:pt-12">
