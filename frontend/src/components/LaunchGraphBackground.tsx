@@ -20,7 +20,7 @@ type SimNode = LaunchGraphNode &
     driftOffset: number
   }
 
-type SimLink = LaunchGraphLink & {
+type SimLink = Omit<LaunchGraphLink, 'source' | 'target'> & {
   source: SimNode
   target: SimNode
 } & SimulationLinkDatum<SimNode>
@@ -56,7 +56,7 @@ export function LaunchGraphBackground() {
       const target = nodeById.get(link.target)
       if (!source || !target) return []
       return [{
-        ...link,
+        id: link.id,
         source,
         target,
       }]

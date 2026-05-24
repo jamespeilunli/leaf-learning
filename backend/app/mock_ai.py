@@ -349,9 +349,7 @@ async def topics_are_same_or_similar(
 
     overlap = len(left_tokens & right_tokens)
     union = len(left_tokens | right_tokens)
-    if left_key in right_key or right_key in left_key:
-        return True
-    return union > 0 and overlap / union >= 0.6
+    return union > 0 and overlap / union >= 0.8
 async def chat_with_node(
     node_label: str,
     node_description: str,

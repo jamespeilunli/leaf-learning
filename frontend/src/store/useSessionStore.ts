@@ -424,8 +424,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set((state) => {
       if (!state.session) return state
       const exists = state.session.edges.some((current) => current.id === edge.id)
-      const parent = state.session.nodes[edge.to]
-      const child = state.session.nodes[edge.from]
+      const parent = state.session.nodes[edge.from]
+      const child = state.session.nodes[edge.to]
       return {
         session: {
           ...state.session,
@@ -433,22 +433,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             ...state.session.nodes,
             ...(parent
               ? {
-                  [edge.to]: {
+                  [edge.from]: {
                     ...parent,
-                    child_ids: parent.child_ids.includes(edge.from)
-                      ? parent.child_ids
-                      : [...parent.child_ids, edge.from],
+                    child_ids: (parent.child_ids ?? []).includes(edge.to)
+                      ? (parent.child_ids ?? [])
+                      : [...(parent.child_ids ?? []), edge.to],
                   },
                 }
               : {}),
             ...(child
               ? {
-                  [edge.from]: {
+                  [edge.to]: {
                     ...child,
-                    parent_id: child.parent_id ?? edge.to,
-                    parent_ids: child.parent_ids.includes(edge.to)
-                      ? child.parent_ids
-                      : [...child.parent_ids, edge.to],
+                    parent_id: child.parent_id ?? edge.from,
+                    parent_ids: (child.parent_ids ?? []).includes(edge.from)
+                      ? (child.parent_ids ?? [])
+                      : [...(child.parent_ids ?? []), edge.from],
                   },
                 }
               : {}),

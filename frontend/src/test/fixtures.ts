@@ -9,6 +9,7 @@ export function makeNode(overrides: Partial<GraphNode> & Pick<GraphNode, 'id' | 
     sources: [],
     resource: null,
     parent_id: null,
+    parent_ids: [],
     child_ids: [],
     depth: 0,
     chat_history: [],
