@@ -8,7 +8,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.ai import expand_phase2_node, explain_prerequisite, suggest_prerequisite
-from app.models import GraphEdge, GraphNode, Resource, Session
+from app.dedup import find_duplicate_node
+from app.graph_utils import add_phase2_child, detach_child, normalized_label
+from app.models import GraphNode, Resource, Session
 from app.storage import load_session, save_session
 
 
@@ -32,10 +34,6 @@ def _get_node(session: Session, node_id: str) -> GraphNode:
     if not node:
         raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
     return node
-
-
-def _normalized(label: str) -> str:
-    return " ".join(label.lower().strip().split())
 
 
 def _collect_descendants(session: Session, node_id: str) -> set[str]:
@@ -88,23 +86,28 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
 
             if event_name == "node_added":
                 child = GraphNode.model_validate(data)
-                child.parent_id = node.id
-                child.depth = node.depth + 1
-                child.phase = "2"
-                child.node_state = "grayed"
-                session.nodes[child.id] = child
-                if child.id not in node.child_ids:
-                    node.child_ids.append(child.id)
+                duplicate = await find_duplicate_node(
+                    session,
+                    child.label,
+                    phase="2",
+                    goal_label=goal_label,
+                    parent_label=node.label,
+                )
+                if duplicate and duplicate.id != child.id:
+                    save_session(session)
+                    continue
+                added_child, edge, created = add_phase2_child(session, node, child)
+                if not added_child:
+                    save_session(session)
+                    continue
                 save_session(session)
-                yield _sse("node_added", child.model_dump(by_alias=True))
+                if created:
+                    yield _sse("node_added", added_child.model_dump(by_alias=True))
+                if edge:
+                    yield _sse("edge_added", edge.model_dump(by_alias=True))
                 continue
 
             if event_name == "edge_added":
-                edge = GraphEdge.model_validate(data)
-                edge.from_id = node.id
-                session.edges.append(edge)
-                save_session(session)
-                yield _sse("edge_added", edge.model_dump(by_alias=True))
                 continue
 
             save_session(session)
@@ -139,13 +142,21 @@ async def suggest_node_prerequisite(
         parent_id=parent.id,
         depth=parent.depth + 1,
     )
-    edge = GraphEdge(from_id=parent.id, to_id=child.id, label="requires")
-    session.nodes[child.id] = child
-    parent.child_ids.append(child.id)
-    session.edges.append(edge)
+    duplicate = await find_duplicate_node(
+        session,
+        child.label,
+        phase="2",
+        goal_label=_get_node(session, session.focus_node_id).label if session.focus_node_id else session.root_topic,
+        parent_label=parent.label,
+    )
+    if duplicate:
+        raise HTTPException(status_code=409, detail=f"Duplicate prerequisite matched existing node '{duplicate.label}'.")
+    added_child, edge, created = add_phase2_child(session, parent, child)
     save_session(session)
+    if not added_child or not edge:
+        raise HTTPException(status_code=409, detail="Duplicate or cyclic prerequisite was rejected.")
     return {
-        "node": child.model_dump(by_alias=True),
+        "node": added_child.model_dump(by_alias=True),
         "edge": edge.model_dump(by_alias=True),
     }
 
@@ -156,9 +167,10 @@ async def explain_node(session_id: str, node_id: str) -> dict:
     node = _get_node(session, node_id)
     if node.node_state != "grayed":
         raise HTTPException(status_code=400, detail="Only grayed nodes can be explained.")
-    if not node.parent_id:
+    parent_id = node.parent_ids[0] if node.parent_ids else node.parent_id
+    if not parent_id:
         raise HTTPException(status_code=400, detail="Node has no parent context.")
-    parent = _get_node(session, node.parent_id)
+    parent = _get_node(session, parent_id)
     text = await explain_prerequisite(
         node.label,
         parent.label,
@@ -175,11 +187,11 @@ def delete_node(session_id: str, node_id: str) -> dict:
     node = _get_node(session, node_id)
     removed_node_ids = _collect_descendants(session, node_id)
 
-    if node.parent_id and node.parent_id in session.nodes:
-        parent = session.nodes[node.parent_id]
-        parent.child_ids = [child_id for child_id in parent.child_ids if child_id != node_id]
-
     for removed_id in removed_node_ids:
+        removed_node = session.nodes.get(removed_id)
+        if removed_node:
+            for parent_id in list(removed_node.parent_ids):
+                detach_child(session, parent_id, removed_id)
         session.nodes.pop(removed_id, None)
 
     session.edges = [
@@ -202,18 +214,18 @@ def update_node_status(session_id: str, node_id: str, payload: UpdateNodeStateRe
     node.node_state = payload.node_state
 
     if payload.node_state == "learned":
-        normalized = _normalized(node.label)
+        normalized = normalized_label(node.label)
         if normalized not in session.known_topics:
             session.known_topics.append(normalized)
         for other in session.nodes.values():
-            if other.node_state == "grayed" and _normalized(other.label) == normalized:
+            if other.node_state == "grayed" and normalized_label(other.label) == normalized:
                 other.explain_more_text = "__known__"
     else:
-        normalized = _normalized(node.label)
+        normalized = normalized_label(node.label)
         if normalized in session.known_topics:
             session.known_topics = [topic for topic in session.known_topics if topic != normalized]
         for other in session.nodes.values():
-            if other.explain_more_text == "__known__" and _normalized(other.label) == normalized:
+            if other.explain_more_text == "__known__" and normalized_label(other.label) == normalized:
                 other.explain_more_text = None
 
     save_session(session)

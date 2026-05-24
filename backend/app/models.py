@@ -42,6 +42,7 @@ class GraphNode(BaseModel):
     resource: Resource | None = None
     sources: list[Resource] = Field(default_factory=list)
     parent_id: str | None = None
+    parent_ids: list[str] = Field(default_factory=list)
     child_ids: list[str] = Field(default_factory=list)
     depth: int = 0
     chat_history: list[ChatMessage] = Field(default_factory=list)
@@ -51,6 +52,11 @@ class GraphNode(BaseModel):
     def backfill_sources_from_resource(self) -> "GraphNode":
         if not self.sources and self.resource is not None:
             self.sources = [self.resource]
+        if self.parent_id and self.parent_id not in self.parent_ids:
+            self.parent_ids.insert(0, self.parent_id)
+        if self.parent_ids and self.parent_id is None:
+            self.parent_id = self.parent_ids[0]
+        self.parent_ids = list(dict.fromkeys(self.parent_ids))
         return self
 
 

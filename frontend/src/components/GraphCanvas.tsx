@@ -61,9 +61,13 @@ async function layoutTree(nodes: AppGraphNode[], edges: RFEdge[]): Promise<RFNod
       'elk.algorithm': 'layered',
       'elk.direction': 'DOWN',
       'elk.spacing.nodeNode': '52',
+      'elk.spacing.edgeNode': '28',
       'elk.layered.spacing.nodeNodeBetweenLayers': '110',
       'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
       'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+      'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.layered.mergeEdges': 'true',
+      'elk.layered.unnecessaryBendpoints': 'true',
     },
     children,
     edges: edges.map((edge) => ({

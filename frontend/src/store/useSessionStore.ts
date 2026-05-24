@@ -349,6 +349,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   _applyNodeAdded(node) {
     set((state) => {
       if (!state.session) return state
+      const existingNode = state.session.nodes[node.id]
       const parentId = node.parent_id
       const parent = parentId ? state.session.nodes[parentId] : null
       return {
@@ -356,7 +357,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           ...state.session,
           nodes: {
             ...state.session.nodes,
-            [node.id]: node,
+            [node.id]:
+              existingNode
+                ? {
+                    ...existingNode,
+                    ...node,
+                    parent_ids: Array.from(new Set([...(existingNode.parent_ids ?? []), ...(node.parent_ids ?? [])])),
+                  }
+                : node,
             ...(parentId && parent
               ? {
                   [parentId]: {
@@ -399,9 +407,35 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set((state) => {
       if (!state.session) return state
       const exists = state.session.edges.some((current) => current.id === edge.id)
+      const parent = state.session.nodes[edge.to]
+      const child = state.session.nodes[edge.from]
       return {
         session: {
           ...state.session,
+          nodes: {
+            ...state.session.nodes,
+            ...(parent
+              ? {
+                  [edge.to]: {
+                    ...parent,
+                    child_ids: parent.child_ids.includes(edge.from)
+                      ? parent.child_ids
+                      : [...parent.child_ids, edge.from],
+                  },
+                }
+              : {}),
+            ...(child
+              ? {
+                  [edge.from]: {
+                    ...child,
+                    parent_id: child.parent_id ?? edge.to,
+                    parent_ids: child.parent_ids.includes(edge.to)
+                      ? child.parent_ids
+                      : [...child.parent_ids, edge.to],
+                  },
+                }
+              : {}),
+          },
           edges: exists ? state.session.edges : [...state.session.edges, edge],
         },
       }

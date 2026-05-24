@@ -37,7 +37,8 @@ def _goal_path(session: Session, node: GraphNode) -> list[str]:
         labels.append(current.label)
         if current.id == session.focus_node_id:
             return list(reversed(labels))
-        current = session.nodes.get(current.parent_id) if current.parent_id else None
+        next_parent_id = current.parent_ids[0] if current.parent_ids else current.parent_id
+        current = session.nodes.get(next_parent_id) if next_parent_id else None
     return [session.root_topic, node.label]
 
 

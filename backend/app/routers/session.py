@@ -4,6 +4,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.ai import generate_phase1_children
+from app.dedup import find_duplicate_node
+from app.graph_utils import find_node_by_label, has_ancestor_with_label
 from app.models import GraphNode, Session
 from app.storage import list_sessions, load_session, save_session
 
@@ -59,10 +61,23 @@ async def create_session(payload: CreateSessionRequest) -> dict:
     async for event in generate_phase1_children(topic, []):
         if event["event"] == "node_added":
             child = GraphNode.model_validate(event["data"])
+            if has_ancestor_with_label(session, root_node.id, child.label):
+                continue
+            duplicate = find_node_by_label(session, child.label, phase="1") or await find_duplicate_node(
+                session,
+                child.label,
+                phase="1",
+                goal_label=topic,
+                parent_label=root_node.label,
+            )
+            if duplicate:
+                continue
             child.parent_id = root_node.id
+            child.parent_ids = [root_node.id]
             child.depth = 1
             session.nodes[child.id] = child
-            root_node.child_ids.append(child.id)
+            if child.id not in root_node.child_ids:
+                root_node.child_ids.append(child.id)
         elif event["event"] == "stream_error":
             raise HTTPException(status_code=502, detail=event["data"]["message"])
 
@@ -98,10 +113,23 @@ async def select_topic(session_id: str, payload: SelectTopicRequest) -> dict:
     async for event in generate_phase1_children(selected.label, _ancestor_labels(session, selected)):
         if event["event"] == "node_added":
             child = GraphNode.model_validate(event["data"])
+            if has_ancestor_with_label(session, selected.id, child.label):
+                continue
+            duplicate = find_node_by_label(session, child.label, phase="1") or await find_duplicate_node(
+                session,
+                child.label,
+                phase="1",
+                goal_label=session.root_topic,
+                parent_label=selected.label,
+            )
+            if duplicate:
+                continue
             child.parent_id = payload.node_id
+            child.parent_ids = [payload.node_id]
             child.depth = selected.depth + 1
             session.nodes[child.id] = child
-            selected.child_ids.append(child.id)
+            if child.id not in selected.child_ids:
+                selected.child_ids.append(child.id)
         elif event["event"] == "stream_error":
             raise HTTPException(status_code=502, detail=event["data"]["message"])
 
