@@ -85,6 +85,22 @@ class ApiFlowTests(unittest.TestCase):
         self.assertEqual(dived["nodes"][child_id]["phase"], "2")
         self.assertTrue(dived["nodes"][child_id]["is_visible"])
 
+    def test_clear_sessions_deletes_all_saved_topics_and_flowcharts(self) -> None:
+        first_id, _ = self.create_machine_learning_session()
+        second_id, _ = self.create_machine_learning_session()
+
+        listed_before = self.client.get("/api/sessions")
+        cleared = self.client.delete("/api/sessions")
+        listed_after = self.client.get("/api/sessions")
+
+        self.assertEqual(listed_before.status_code, 200)
+        self.assertEqual(len(listed_before.json()), 2)
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual(cleared.json()["deleted_count"], 2)
+        self.assertEqual(listed_after.json(), [])
+        self.assertEqual(self.client.get(f"/api/session/{first_id}").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/session/{second_id}").status_code, 404)
+
     def test_deep_dive_returns_immediately_and_expand_reveals_next_layer(self) -> None:
         session_id, session = self.create_machine_learning_session()
         root_id = session["current_phase1_node_id"]

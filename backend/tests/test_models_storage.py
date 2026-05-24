@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from app.models import ChatMessage, GraphEdge, GraphNode, Session
 from app.phase2_prefetch import PHASE2_MAX_DEPTH_ENV, phase2_max_depth_from_focus
-from app.storage import list_sessions, load_session, merge_save_session, save_session
+from app.storage import delete_all_sessions, list_sessions, load_session, merge_save_session, save_session
 
 from tests.helpers import isolated_sessions_dir
 
@@ -49,6 +49,17 @@ class ModelAndStorageTests(unittest.TestCase):
         self.assertEqual(loaded.root_topic, "old")
         self.assertEqual([row["id"] for row in rows], [new.id, old.id])
         self.assertEqual(rows[0]["phase"], "1")
+
+    def test_delete_all_sessions_removes_persisted_topic_files(self) -> None:
+        with isolated_sessions_dir() as directory:
+            save_session(Session(root_topic="topic one"))
+            save_session(Session(root_topic="topic two"))
+
+            deleted_count = delete_all_sessions()
+            remaining = list(directory.glob("*.json"))
+
+        self.assertEqual(deleted_count, 2)
+        self.assertEqual(remaining, [])
 
     def test_merge_save_preserves_nodes_from_concurrent_session_writers(self) -> None:
         with isolated_sessions_dir():

@@ -36,14 +36,17 @@ describe('api client', () => {
     mocks.post.mockResolvedValueOnce({ data: { session_id: 'session-1', session } })
     mocks.get.mockResolvedValueOnce({ data: session })
     mocks.get.mockResolvedValueOnce({ data: [{ id: 'session-1', root_topic: 'ML', created_at: 'now', phase: '1' }] })
+    mocks.del.mockResolvedValueOnce({ data: { deleted_count: 1 } })
 
     await expect(api.createSession('ML')).resolves.toEqual({ session_id: 'session-1', session })
     await expect(api.getSession('session-1')).resolves.toBe(session)
     await expect(api.listSessions()).resolves.toHaveLength(1)
+    await expect(api.clearSessions()).resolves.toEqual({ deleted_count: 1 })
 
     expect(mocks.post).toHaveBeenCalledWith('/session', { topic: 'ML' })
     expect(mocks.get).toHaveBeenCalledWith('/session/session-1')
     expect(mocks.get).toHaveBeenCalledWith('/sessions')
+    expect(mocks.del).toHaveBeenCalledWith('/sessions')
   })
 
   it('maps graph mutation endpoints to the backend contract', async () => {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { ArrowLeft, Loader2, Network, Sparkles } from 'lucide-react'
+import { ArrowLeft, Loader2, Network, RotateCcw, Sparkles } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
 import type { ForceGraphMethods } from 'react-force-graph-2d'
 
@@ -184,6 +184,7 @@ export function Phase1View() {
   const session = useSessionStore((state) => state.session)
   const isLoading = useSessionStore((state) => state.isLoading)
   const expandPhase1Topic = useSessionStore((state) => state.expandPhase1Topic)
+  const returnHome = useSessionStore((state) => state.returnHome)
   const restartFlow = useSessionStore((state) => state.restartFlow)
   const error = useSessionStore((state) => state.error)
   const graphRef = useRef<ForceGraphMethods | null>(null)
@@ -361,9 +362,17 @@ export function Phase1View() {
                 leftIcon={<ArrowLeft aria-hidden="true" className="h-4 w-4" />}
                 size="sm"
                 variant="secondary"
-                onClick={restartFlow}
+                onClick={returnHome}
               >
-                Start
+                Back
+              </Button>
+              <Button
+                leftIcon={<RotateCcw aria-hidden="true" className="h-4 w-4" />}
+                size="sm"
+                variant="secondary"
+                onClick={() => void restartFlow()}
+              >
+                Clear cache
               </Button>
             </div>
           </div>
