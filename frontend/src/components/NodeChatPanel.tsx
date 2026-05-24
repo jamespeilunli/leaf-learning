@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 
-import { X } from 'lucide-react'
+import { Send, X } from 'lucide-react'
 
 import { streamSSE } from '../hooks/useSSE'
 import { useSessionStore } from '../store/useSessionStore'
 import type { ChatMessage } from '../types'
+import { Button, Eyebrow, IconButton, StatusNotice, TextArea } from './ui'
 
 type LocalMessage = ChatMessage & { id: string }
 
@@ -96,27 +97,30 @@ export function NodeChatPanel() {
   }
 
   return (
-    <aside className="absolute inset-y-4 right-4 z-30 flex w-[360px] flex-col overflow-hidden rounded-[28px] border border-[var(--line)] bg-[var(--paper)] shadow-[0_32px_90px_rgba(15,23,42,0.22)]">
+    <aside className="absolute inset-x-3 bottom-3 top-12 z-40 flex flex-col overflow-hidden rounded-[var(--radius-md)] border border-[var(--line)] bg-[var(--paper)] shadow-[var(--shadow-strong)] md:inset-x-auto md:inset-y-4 md:right-[420px] md:w-[360px]">
       <header className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted-strong)]">
-            Node Chat
-          </p>
+          <Eyebrow>Node chat</Eyebrow>
           <h2 className="mt-1 text-lg font-semibold">{node.label}</h2>
         </div>
-        <button className="rounded-full border border-[var(--line)] p-2 text-[var(--muted)]" type="button" onClick={closeChat}>
+        <IconButton label="Close chat" onClick={closeChat}>
           <X className="h-4 w-4" />
-        </button>
+        </IconButton>
       </header>
 
       <div ref={containerRef} className="flex-1 space-y-3 overflow-y-auto bg-[var(--panel)] px-4 py-4">
+        {!messages.length ? (
+          <StatusNotice tone="info">
+            Ask a scoped question about this concept, prerequisite, or source list.
+          </StatusNotice>
+        ) : null}
         {messages.map((message) => (
           <div
             key={message.id}
             className={
               message.role === 'user'
-                ? 'ml-10 rounded-[18px] bg-[var(--ink)] px-4 py-3 text-sm leading-6 text-[var(--paper)]'
-                : 'mr-10 rounded-[18px] bg-white px-4 py-3 text-sm leading-6 text-[var(--ink)]'
+                ? 'ml-10 rounded-[var(--radius-sm)] bg-[var(--ink)] px-4 py-3 text-sm leading-6 text-[var(--paper)]'
+                : 'mr-10 rounded-[var(--radius-sm)] bg-white px-4 py-3 text-sm leading-6 text-[var(--ink)] shadow-sm'
             }
           >
             {message.content || (isStreaming && message.role === 'assistant' ? '...' : '')}
@@ -125,21 +129,24 @@ export function NodeChatPanel() {
       </div>
 
       <form className="border-t border-[var(--line)] p-4" onSubmit={handleSend}>
-        <textarea
-          className="min-h-24 w-full resize-none rounded-[18px] border border-[var(--line)] bg-white p-3 text-sm leading-6 outline-none focus:border-[var(--accent)]"
+        <TextArea
+          className="min-h-24"
+          invalid={Boolean(error)}
           placeholder="Ask about this node..."
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
         />
-        {error ? <p className="mt-2 text-xs text-[var(--danger)]">{error}</p> : null}
+        {error ? <StatusNotice className="mt-3" tone="error">{error}</StatusNotice> : null}
         <div className="mt-3 flex justify-end">
-          <button
-            className="rounded-full bg-[var(--ink)] px-4 py-2 text-sm font-semibold text-[var(--paper)] transition hover:bg-[var(--accent)] disabled:opacity-60"
+          <Button
             disabled={isStreaming}
+            isLoading={isStreaming}
+            rightIcon={<Send aria-hidden="true" className="h-4 w-4" />}
+            size="sm"
             type="submit"
           >
             {isStreaming ? 'Streaming...' : 'Send'}
-          </button>
+          </Button>
         </div>
       </form>
     </aside>

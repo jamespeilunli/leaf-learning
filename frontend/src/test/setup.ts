@@ -71,3 +71,18 @@ HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
 })) as typeof HTMLCanvasElement.prototype.getContext
 
 Element.prototype.scrollTo = vi.fn()
+
+HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+  arc: vi.fn(),
+  beginPath: vi.fn(),
+  clearRect: vi.fn(),
+  fill: vi.fn(),
+  fillStyle: '',
+  lineTo: vi.fn(),
+  lineWidth: 0,
+  moveTo: vi.fn(),
+  shadowBlur: 0,
+  shadowColor: '',
+  stroke: vi.fn(),
+  strokeStyle: '',
+}))

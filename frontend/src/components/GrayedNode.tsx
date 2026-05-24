@@ -24,38 +24,44 @@ export function GrayedNode({ data }: NodeProps<{ node: GraphNode }>) {
     <div
       aria-label={`Activate ${node.label}`}
       aria-disabled={isDisabled}
-      className="group relative h-[132px] w-[236px] cursor-pointer rounded-[8px] border border-dashed border-slate-400 bg-white/55 p-3 text-left opacity-80 shadow-[0_10px_22px_rgba(15,23,42,0.10)] backdrop-blur transition hover:border-slate-500 hover:bg-white/70 hover:opacity-100 hover:shadow-[0_16px_34px_rgba(15,23,42,0.16)] focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 aria-disabled:cursor-default"
+      className="group relative h-[132px] w-[236px] cursor-pointer rounded-[var(--radius-sm)] border border-dashed border-[var(--line-strong)] bg-white/62 p-3 text-left opacity-85 shadow-[0_10px_22px_rgba(15,23,42,0.10)] backdrop-blur transition hover:border-[var(--accent)] hover:bg-white/76 hover:opacity-100 hover:shadow-[0_16px_34px_rgba(15,23,42,0.16)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 aria-disabled:cursor-default"
       role="button"
       tabIndex={isDisabled ? -1 : 0}
-      onClick={activateNode}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
           activateNode()
         }
       }}
+      onPointerDown={(event) => {
+        event.stopPropagation()
+        if (event.button !== 0) return
+        event.currentTarget.focus()
+        activateNode()
+      }}
     >
       <Handle position={Position.Top} style={{ opacity: 0 }} type="target" />
       {isKnownElsewhere ? (
-        <div className="mb-2 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
+        <div className="mb-2 inline-flex rounded-full border border-[var(--success)]/20 bg-[var(--success-soft)] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--success)]">
           Learned elsewhere
         </div>
       ) : null}
-      <div className="line-clamp-2 text-[14px] font-bold leading-5 text-slate-800">{node.label}</div>
+      <div className="line-clamp-2 text-[14px] font-bold leading-5 text-[var(--ink)]">{node.label}</div>
       {node.description ? <p className="mt-2 line-clamp-3 text-[12px] leading-4 text-[var(--muted)]">{node.description}</p> : null}
 
       {isExpanding ? (
-        <div className="absolute bottom-3 right-3 text-slate-500">
+        <div className="absolute bottom-3 right-3 text-[var(--muted)]">
           <Loader2 className="h-4 w-4 animate-spin" />
         </div>
       ) : null}
 
       {isKnownElsewhere ? null : (
-        <div className="absolute -right-2 -top-2 flex scale-95 items-center gap-1 opacity-0 transition group-hover:scale-100 group-hover:opacity-100">
+        <div className="absolute -right-2 -top-2 flex scale-95 items-center gap-1 opacity-0 transition group-focus-within:scale-100 group-focus-within:opacity-100 group-hover:scale-100 group-hover:opacity-100">
           <button
             aria-label={`Remove ${node.label}`}
             className="grid h-7 w-7 place-items-center rounded-full border border-rose-200 bg-rose-50 text-rose-700 shadow-sm transition hover:bg-rose-600 hover:text-white"
             type="button"
+            onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation()
               void deleteNode(node.id)

@@ -1,4 +1,7 @@
+import { ChevronRight } from 'lucide-react'
+
 import { useSessionStore } from '../store/useSessionStore'
+import { Button } from './ui'
 
 interface DeepDiveButtonProps {
   nodeId: string
