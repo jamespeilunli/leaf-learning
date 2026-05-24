@@ -9,7 +9,8 @@ from app.graph_utils import add_phase2_child
 from app.models import GraphNode, Resource, Session
 
 
-MAX_PHASE2_LEVELS = 6
+MAX_PHASE2_LEVELS = 2
+MAX_PHASE2_EXPANDED_NODES = 8
 
 
 async def precompute_phase2_roadmap(session: Session, focus_node_id: str) -> None:
@@ -24,6 +25,9 @@ async def precompute_phase2_roadmap(session: Session, focus_node_id: str) -> Non
     expanded_ids: set[str] = set()
 
     while queue:
+        if len(expanded_ids) >= MAX_PHASE2_EXPANDED_NODES:
+            break
+
         node_id, level = queue.popleft()
         node = session.nodes.get(node_id)
         if not node or node_id in expanded_ids:
@@ -55,7 +59,13 @@ async def precompute_phase2_roadmap(session: Session, focus_node_id: str) -> Non
                 linked_child, _, created = add_phase2_child(session, node, child)
                 if not linked_child:
                     continue
-                if level + 1 < MAX_PHASE2_LEVELS and linked_child.id not in queued_ids:
+                should_queue = created or (not linked_child.sources and not linked_child.child_ids)
+                if (
+                    should_queue
+                    and level + 1 < MAX_PHASE2_LEVELS
+                    and linked_child.id not in queued_ids
+                    and len(queued_ids) < MAX_PHASE2_EXPANDED_NODES
+                ):
                     queue.append((linked_child.id, level + 1))
                     queued_ids.add(linked_child.id)
                 continue

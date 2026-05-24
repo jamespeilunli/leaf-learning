@@ -212,6 +212,21 @@ describe('frontend components', () => {
     expect(mockedStreamSSE).not.toHaveBeenCalled()
   })
 
+  it('DeepDiveButton stays disabled while roadmap generation is in flight', async () => {
+    const user = userEvent.setup()
+    setStoreSession(makeSession())
+    useSessionStore.setState({ isLoading: true })
+
+    render(<Phase1View />)
+
+    await user.click(screen.getByRole('button', { name: 'Machine Learning' }))
+    const button = screen.getByRole('button', { name: 'Building roadmap...' })
+    expect(button).toBeDisabled()
+
+    await user.click(button)
+    expect(mockedApi.deepDive).not.toHaveBeenCalled()
+  })
+
   it('Phase2Node shows resource state and opens the node details sidebar', async () => {
     const user = userEvent.setup()
     const session = makePhase2Session()
