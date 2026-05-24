@@ -299,8 +299,6 @@ Immediate parent context: {parent_label or ""}
     )
     payload = _loads_json_object(_extract_response_text(response))
     return bool(payload["same_or_similar"])
-
-
 async def chat_with_node(
     node_label: str,
     node_description: str,
