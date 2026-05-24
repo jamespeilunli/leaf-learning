@@ -7,13 +7,11 @@ interface DeepDiveButtonProps {
 export function DeepDiveButton({ nodeId }: DeepDiveButtonProps) {
   const session = useSessionStore((state) => state.session)
   const deepDive = useSessionStore((state) => state.deepDive)
-  const expandNode = useSessionStore((state) => state.expandNode)
 
   async function handleDeepDive() {
     if (!session) return
 
     await deepDive(nodeId)
-    await expandNode(nodeId)
   }
 
   return (

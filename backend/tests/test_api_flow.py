@@ -78,30 +78,28 @@ class ApiFlowTests(unittest.TestCase):
         self.assertEqual(dived["focus_node_id"], child_id)
         self.assertEqual(dived["nodes"][child_id]["phase"], "2")
 
-    def test_phase2_expand_explain_learned_dedupe_and_prune(self) -> None:
+    def test_phase2_precomputes_roadmap_then_explain_learned_dedupe_and_prune(self) -> None:
         session_id, session = self.create_machine_learning_session()
         root_id = session["current_phase1_node_id"]
         child_id = session["nodes"][root_id]["child_ids"][0]
         self.client.post(f"/api/session/{session_id}/resolution", json={"resolution": "intuitive"})
-        self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id})
+        dived = self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id}).json()["session"]
 
-        expand_response = self.client.post(f"/api/session/{session_id}/node/{child_id}/expand")
-        events = parse_sse(expand_response.text)
-        event_names = [name for name, _ in events]
-        self.assertIn("node_updated", event_names)
-        self.assertGreaterEqual(event_names.count("node_added"), 2)
-        self.assertIn("edge_added", event_names)
-
-        expanded = self.client.get(f"/api/session/{session_id}").json()
-        child = expanded["nodes"][child_id]
-        grayed_ids = [node_id for node_id in child["child_ids"] if expanded["nodes"][node_id]["node_state"] == "grayed"]
+        child = dived["nodes"][child_id]
+        self.assertEqual(child["node_state"], "expanded")
+        self.assertGreaterEqual(len(child["sources"]), 1)
+        grayed_ids = [
+            node_id
+            for node_id, node in dived["nodes"].items()
+            if node["node_state"] == "grayed" and node.get("parent_id")
+        ]
         first_prereq_id = grayed_ids[0]
 
         explained = self.client.post(f"/api/session/{session_id}/node/{first_prereq_id}/explain").json()
-        self.assertIn(expanded["nodes"][first_prereq_id]["label"], explained["explain_more_text"])
+        self.assertIn(dived["nodes"][first_prereq_id]["label"], explained["explain_more_text"])
 
         duplicate = GraphNode(
-            label=f"  {expanded['nodes'][first_prereq_id]['label'].upper()}  ",
+            label=f"  {dived['nodes'][first_prereq_id]['label'].upper()}  ",
             description="Duplicate prerequisite",
             phase="2",
             node_state="grayed",
@@ -117,7 +115,7 @@ class ApiFlowTests(unittest.TestCase):
             f"/api/session/{session_id}/node/{first_prereq_id}/status",
             json={"node_state": "learned"},
         ).json()
-        self.assertIn(expanded["nodes"][first_prereq_id]["label"].lower(), learned["known_topics"])
+        self.assertIn(dived["nodes"][first_prereq_id]["label"].lower(), learned["known_topics"])
         self.assertEqual(learned["nodes"][duplicate.id]["explain_more_text"], "__known__")
 
         pruned = self.client.delete(f"/api/session/{session_id}/node/{first_prereq_id}").json()
@@ -143,7 +141,6 @@ class ApiFlowTests(unittest.TestCase):
         child_id = session["nodes"][root_id]["child_ids"][0]
         self.client.post(f"/api/session/{session_id}/resolution", json={"resolution": "technical"})
         self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id})
-        self.client.post(f"/api/session/{session_id}/node/{child_id}/expand")
 
         response = self.client.post(
             f"/api/session/{session_id}/node/{child_id}/chat",

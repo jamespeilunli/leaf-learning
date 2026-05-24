@@ -4,7 +4,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.ai import generate_phase1_children
-from app.models import GraphNode, Session
+from app.models import GraphNode, Resolution, Session
+from app.roadmap_builder import precompute_phase2_roadmap
 from app.storage import list_sessions, load_session, save_session
 
 
@@ -21,6 +22,10 @@ class SelectTopicRequest(BaseModel):
 
 class DeepDiveRequest(BaseModel):
     node_id: str
+
+
+class SetResolutionRequest(BaseModel):
+    resolution: Resolution
 
 
 def _get_node(session: Session, node_id: str) -> GraphNode:
@@ -146,19 +151,21 @@ def back(session_id: str) -> dict:
 
 
 @router.post("/session/{session_id}/resolution")
-def set_resolution(session_id: str) -> dict:
+def set_resolution(session_id: str, payload: SetResolutionRequest) -> dict:
     session = load_session(session_id)
-    session.resolution = "technical"
+    session.resolution = payload.resolution
     save_session(session)
     return session.model_dump(by_alias=True)
 
 
 @router.post("/session/{session_id}/deep-dive")
-def deep_dive(session_id: str, payload: DeepDiveRequest) -> dict:
+async def deep_dive(session_id: str, payload: DeepDiveRequest) -> dict:
     session = load_session(session_id)
     node = _get_node(session, payload.node_id)
     session.focus_node_id = payload.node_id
     session.phase = "2"
     node.phase = "2"
+    node.node_state = "expanded"
+    await precompute_phase2_roadmap(session, payload.node_id)
     save_session(session)
     return {"session": session.model_dump(by_alias=True)}

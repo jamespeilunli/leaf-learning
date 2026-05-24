@@ -59,7 +59,7 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
     node = _get_node(session, node_id)
     if not session.focus_node_id:
         raise HTTPException(status_code=400, detail="Phase 2 focus node is not set.")
-    if node.node_state != "grayed" and node.id != session.focus_node_id:
+    if node.node_state != "grayed":
         raise HTTPException(status_code=400, detail="Node is not expandable.")
     node.node_state = "expanded"
     save_session(session)
@@ -68,6 +68,7 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
     async def event_stream() -> Iterable[str]:
         async for event in expand_phase2_node(
             node.label,
+            session.resolution,
             session.known_topics,
             goal_label,
         ):

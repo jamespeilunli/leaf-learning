@@ -203,14 +203,13 @@ describe('frontend components', () => {
     const user = userEvent.setup()
     setStoreSession(makeSession())
     mockedApi.deepDive.mockResolvedValue({ session: makePhase2Session() })
-    mockedStreamSSE.mockImplementation(async function* () {})
 
     render(<Phase1View />)
 
     await user.click(screen.getByRole('button', { name: 'Machine Learning' }))
     await user.click(screen.getByRole('button', { name: 'Deep Dive →' }))
     expect(mockedApi.deepDive).toHaveBeenCalledWith('session-1', 'root')
-    expect(mockedStreamSSE).toHaveBeenCalled()
+    expect(mockedStreamSSE).not.toHaveBeenCalled()
   })
 
   it('Phase2Node shows resource state and opens the node details sidebar', async () => {

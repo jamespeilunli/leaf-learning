@@ -34,6 +34,9 @@ def test_client() -> TestClient:
     return TestClient(app)
 
 
+test_client.__test__ = False
+
+
 def parse_sse(text: str) -> list[tuple[str, object]]:
     events: list[tuple[str, object]] = []
     current_event = "message"

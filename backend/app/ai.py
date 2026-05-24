@@ -7,7 +7,8 @@ from collections.abc import AsyncGenerator
 from openai import AsyncOpenAI
 
 from app import mock_ai
-from app.models import ChatMessage, GraphEdge, GraphNode, Resource
+from app.models import ChatMessage, GraphEdge, GraphNode, Resource, Resolution
+from app.source_verifier import filter_verified_sources
 
 
 MODEL = "gpt-4o"
@@ -118,11 +119,15 @@ Do not repeat or rephrase topics already in the selection path.
 
 
 async def expand_phase2_node(
-    node_label: str, known_topics: list[str], goal_label: str
+    node_label: str,
+    resolution: Resolution,
+    known_topics: list[str],
+    goal_label: str,
 ) -> AsyncGenerator[dict, None]:
     if using_mock_ai():
         async for event in mock_ai.expand_phase2_node(
             node_label,
+            resolution,
             known_topics,
             goal_label,
         ):
@@ -131,7 +136,8 @@ async def expand_phase2_node(
 
     instructions = f"""
 You are a learning roadmap assistant. The user's goal is to understand "{goal_label}".
-Explain topics at a technical level with formal, precise, mechanism-focused detail.
+Explain topics at a {resolution} level.
+{"Favor intuition, accessible analogies, and concept-building explanations." if resolution == "intuitive" else "Favor formal, precise, mechanism-focused detail."}
 
 Search for and read the best resources that genuinely explain "{node_label}" at this technical level.
 The resources must explain the topic in depth, not just introduce it.
@@ -170,6 +176,7 @@ Return ONLY the JSON object. No prose, no markdown fences.
 
         raw_sources = payload.get("sources") or [payload["resource"]]
         sources = [Resource.model_validate(item) for item in raw_sources[:4]]
+        sources = await filter_verified_sources(sources)
         yield {
             "event": "node_updated",
             "data": {
@@ -259,6 +266,7 @@ async def chat_with_node(
     node_label: str,
     node_description: str,
     resource_description: str,
+    resolution: Resolution,
     goal_path: list[str],
     history: list[ChatMessage],
     user_message: str,
@@ -268,6 +276,7 @@ async def chat_with_node(
             node_label,
             node_description,
             resource_description,
+            resolution,
             goal_path,
             history,
             user_message,
@@ -281,6 +290,7 @@ You are a focused tutor helping the user understand "{node_label}".
 Their overall learning goal is: {goal_path[0]}
 They reached this topic via: {" → ".join(goal_path)}
 Preferred depth: technical, formal, and precise.
+Preferred style: {resolution}.
 About this topic: {node_description}
 The primary resource covers: {resource_description}
 

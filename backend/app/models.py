@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def new_id() -> str:
@@ -17,7 +17,7 @@ def now_iso() -> str:
 
 NodeState = Literal["expanded", "grayed", "learned"]
 Phase = Literal["1", "2"]
-Resolution = Literal["technical"]
+Resolution = Literal["intuitive", "technical"]
 
 
 class Resource(BaseModel):
@@ -75,8 +75,3 @@ class Session(BaseModel):
     known_topics: list[str] = Field(default_factory=list)
     nodes: dict[str, GraphNode] = Field(default_factory=dict)
     edges: list[GraphEdge] = Field(default_factory=list)
-
-    @field_validator("resolution", mode="before")
-    @classmethod
-    def force_technical_resolution(cls, value: object) -> Resolution:
-        return "technical"

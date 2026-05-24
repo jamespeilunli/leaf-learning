@@ -81,17 +81,20 @@ describe('useSessionStore', () => {
     expect(getState().session).toBe(backed)
   })
 
-  it('starts deep dive and expands the focus node', async () => {
+  it('starts deep dive with a precomputed roadmap and expands only grayed follow-up nodes', async () => {
     useSessionStore.setState({ sessionId: 'session-1', session: makeSession() })
     const phase2 = makePhase2Session()
     mockedApi.deepDive.mockResolvedValue({ session: phase2 })
     mockedStreamSSE.mockImplementation(async function* () {})
 
     await getState().deepDive('goal')
-    await getState().expandNode('goal')
 
     expect(mockedApi.deepDive).toHaveBeenCalledWith('session-1', 'goal')
-    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/goal/expand', {})
+    expect(getState().session).toBe(phase2)
+
+    await getState().expandNode('prereq')
+
+    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/prereq/expand', {})
     expect(getState().streamingNodeIds.size).toBe(0)
   })
 
