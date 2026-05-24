@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from app.ai import generate_phase1_children
 from app.models import GraphNode, Session
-from app.storage import list_sessions, load_session, save_session
+from app.storage import delete_all_sessions, list_sessions, load_session, save_session
 
 
 router = APIRouter()
@@ -78,6 +78,11 @@ def get_session(session_id: str) -> dict:
 @router.get("/sessions")
 def get_sessions() -> list[dict]:
     return list_sessions()
+
+
+@router.delete("/sessions")
+def clear_sessions() -> dict:
+    return {"deleted_count": delete_all_sessions()}
 
 
 @router.post("/session/{session_id}/select-topic")

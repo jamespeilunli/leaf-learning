@@ -4,6 +4,7 @@ export function resetSessionStore() {
   useSessionStore.setState({
     sessionId: null,
     session: null,
+    activeView: 'home',
     isLoading: false,
     streamingNodeIds: new Set<string>(),
     explainingNodeIds: new Set<string>(),

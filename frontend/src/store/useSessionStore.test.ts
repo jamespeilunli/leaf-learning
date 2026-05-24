@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { waitFor } from '@testing-library/react'
 
 import * as api from '../lib/api'
+import * as browserData from '../lib/browserData'
 import { streamSSE } from '../hooks/useSSE'
 import { SESSION_STORAGE_KEY, useSessionStore } from './useSessionStore'
 import { makeNode, makePhase2Session, makeSession } from '../test/fixtures'
@@ -12,9 +13,16 @@ vi.mock('../lib/api')
 vi.mock('../hooks/useSSE', () => ({
   streamSSE: vi.fn(),
 }))
+vi.mock('../lib/browserData', () => ({
+  clearBrowserData: vi.fn().mockImplementation(async () => {
+    localStorage.clear()
+    sessionStorage.clear()
+  }),
+}))
 
 const mockedApi = vi.mocked(api)
 const mockedStreamSSE = vi.mocked(streamSSE)
+const mockedClearBrowserData = vi.mocked(browserData.clearBrowserData)
 
 function getState() {
   return useSessionStore.getState()
@@ -46,11 +54,13 @@ describe('useSessionStore', () => {
 
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBe('session-1')
     expect(getState().sessionId).toBe('session-1')
+    expect(getState().activeView).toBe('phase1')
 
     mockedApi.getSession.mockRejectedValueOnce(new Error('missing'))
     await expect(getState().loadSession('missing')).rejects.toThrow('missing')
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
     expect(getState().session).toBeNull()
+    expect(getState().activeView).toBe('home')
   })
 
   it('runs phase 1 navigation and expansion mutations through the API', async () => {
@@ -94,6 +104,27 @@ describe('useSessionStore', () => {
     expect(mockedApi.deepDive).toHaveBeenCalledWith('session-1', 'goal')
     expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/goal/expand', {})
     expect(getState().streamingNodeIds.size).toBe(0)
+    expect(getState().activeView).toBe('phase2')
+  })
+
+  it('switches from phase 2 back to phase 1 locally and can return home without clearing cache', async () => {
+    useSessionStore.setState({
+      sessionId: 'session-1',
+      session: makePhase2Session(),
+      activeView: 'phase2',
+    })
+    localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
+
+    getState().showPhase1()
+    expect(getState().activeView).toBe('phase1')
+    expect(getState().session?.phase).toBe('2')
+
+    getState().returnHome()
+    expect(mockedApi.clearSessions).not.toHaveBeenCalled()
+    expect(mockedClearBrowserData).not.toHaveBeenCalled()
+    expect(getState().activeView).toBe('home')
+    expect(getState().session).toBeNull()
+    expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
   })
 
   it('applies streamed phase 2 node updates, child additions, and edges', async () => {
@@ -311,7 +342,7 @@ describe('useSessionStore', () => {
     expect(getState().error).toBeNull()
   })
 
-  it('manages chat visibility and back-to-start restart state', () => {
+  it('manages chat visibility and clears browser data on restart', async () => {
     useSessionStore.setState({
       sessionId: 'session-1',
       session: makePhase2Session(),
@@ -320,6 +351,7 @@ describe('useSessionStore', () => {
       selectedPhase2NodeId: 'goal',
     })
     localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
+    mockedApi.clearSessions.mockResolvedValue({ deleted_count: 1 })
 
     getState().openChat('goal')
     expect(getState().chatOpenNodeId).toBe('goal')
@@ -327,7 +359,9 @@ describe('useSessionStore', () => {
     getState().closeChat()
     expect(getState().chatOpenNodeId).toBeNull()
 
-    getState().restartFlow()
+    await expect(getState().restartFlow()).resolves.toBe(true)
+    expect(mockedApi.clearSessions).toHaveBeenCalledTimes(1)
+    expect(mockedClearBrowserData).toHaveBeenCalledTimes(1)
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
     expect(getState().session).toBeNull()
     expect(getState().streamingNodeIds.size).toBe(0)
