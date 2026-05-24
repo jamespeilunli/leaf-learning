@@ -1,5 +1,7 @@
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { forwardRef, useImperativeHandle } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '../lib/api'
@@ -10,7 +12,6 @@ import { NodeChatPanel } from './NodeChatPanel'
 import { Phase1OptionCard } from './Phase1OptionCard'
 import { Phase1View } from './Phase1View'
 import { Phase2Node } from './Phase2Node'
-import { ResolutionPicker } from './ResolutionPicker'
 import { StartScreen } from './StartScreen'
 import { SESSION_STORAGE_KEY, useSessionStore } from '../store/useSessionStore'
 import { makeNode, makePhase2Session, makeSession } from '../test/fixtures'
@@ -18,22 +19,86 @@ import { resetSessionStore } from '../test/storeTestUtils'
 import type { Session } from '../types'
 
 vi.mock('reactflow', () => ({
-  default: ({ children, nodes, edges }: { children: React.ReactNode; nodes: unknown[]; edges: unknown[] }) => (
+  default: ({
+    children,
+    nodes,
+    edges,
+    nodeTypes = {},
+  }: {
+    children: ReactNode
+    nodes: Array<{ id: string; type?: string; data: unknown }>
+    edges: unknown[]
+    nodeTypes?: Record<string, ComponentType<Record<string, unknown>>>
+  }) => (
     <div data-edges={edges.length} data-nodes={nodes.length} data-testid="react-flow">
+      {nodes.map((node) => {
+        const NodeComponent = node.type ? nodeTypes[node.type] : null
+        return NodeComponent ? (
+          <NodeComponent key={node.id} data={node.data} {...nodeProps(node.id)} />
+        ) : null
+      })}
       {children}
     </div>
   ),
   Background: () => <div data-testid="background" />,
   Controls: () => <div data-testid="controls" />,
   Handle: () => <span data-testid="handle" />,
+  MarkerType: { ArrowClosed: 'arrowclosed' },
   MiniMap: () => <div data-testid="minimap" />,
   Position: { Top: 'top', Bottom: 'bottom' },
+  getNodesBounds: vi.fn(() => ({ x: 0, y: 0, width: 100, height: 100 })),
+  getViewportForBounds: vi.fn(() => ({ x: 0, y: 0, zoom: 1 })),
+  useReactFlow: () => ({
+    getViewport: vi.fn(() => ({ x: 0, y: 0, zoom: 1 })),
+    setViewport: vi.fn(),
+  }),
+}))
+
+vi.mock('react-force-graph-2d', () => ({
+  default: forwardRef(
+    (
+      {
+        graphData,
+        onNodeClick,
+      }: {
+        graphData: { nodes: Array<{ id: string; label: string }> }
+        onNodeClick?: (node: { id: string; label: string }) => void
+      },
+      ref,
+    ) => {
+      useImperativeHandle(ref, () => ({
+        centerAt: vi.fn(),
+        d3Force: vi.fn(() => ({ distance: vi.fn(), strength: vi.fn() })),
+        d3ReheatSimulation: vi.fn(),
+        refresh: vi.fn(),
+        zoom: vi.fn(),
+        zoomToFit: vi.fn(),
+      }))
+
+      return (
+        <div data-testid="force-graph">
+          {graphData.nodes.map((node) => (
+            <button key={node.id} type="button" onClick={() => onNodeClick?.(node)}>
+              {node.label}
+            </button>
+          ))}
+        </div>
+      )
+    },
+  ),
 }))
 
 vi.mock('../lib/api')
 vi.mock('../hooks/useSSE', () => ({
   streamSSE: vi.fn(),
 }))
+vi.mock('lucide-react', async () => {
+  const actual = await vi.importActual<typeof import('lucide-react')>('lucide-react')
+  return {
+    ...actual,
+    Leaf: (props: React.SVGProps<SVGSVGElement>) => <svg data-testid="leaf-icon" {...props} />,
+  }
+})
 
 const mockedApi = vi.mocked(api)
 const mockedStreamSSE = vi.mocked(streamSSE)
@@ -72,8 +137,15 @@ describe('frontend components', () => {
 
     render(<StartScreen />)
 
-    expect(await screen.findByText('Continue a previous session')).toBeInTheDocument()
-    await user.type(screen.getByLabelText('What do you want to learn?'), 'machine learning')
+    expect(screen.getByText('Leaf Learning')).toBeInTheDocument()
+    expect(screen.getByText('Ready to learn?')).toBeInTheDocument()
+    expect(screen.getByTestId('leaf-icon')).toBeInTheDocument()
+    const resumeHeading = await screen.findByText('Continue a previous session')
+    expect(resumeHeading).toBeInTheDocument()
+    expect(
+      screen.getByLabelText('Ready to learn?').compareDocumentPosition(resumeHeading),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    await user.type(screen.getByLabelText('Ready to learn?'), 'machine learning')
     await user.click(screen.getByRole('button', { name: 'Start exploring' }))
 
     expect(mockedApi.createSession).toHaveBeenCalledWith('machine learning')
@@ -100,7 +172,7 @@ describe('frontend components', () => {
     expect(onSelect).toHaveBeenCalledWith('child-a')
   })
 
-  it('Phase1View renders breadcrumbs, options, loading skeletons, and navigation actions', async () => {
+  it('Phase1View renders graph topics, node details, and expansion actions', async () => {
     const user = userEvent.setup()
     const session = makeSession({
       selection_history: ['root'],
@@ -114,105 +186,63 @@ describe('frontend components', () => {
       depth: 2,
     })
     setStoreSession(session)
-    mockedApi.back.mockResolvedValue(makeSession())
-    mockedApi.selectTopic.mockResolvedValue(makeSession({ current_phase1_node_id: 'grandchild' }))
+    mockedApi.expandPhase1Topic.mockResolvedValue(makeSession())
 
-    const { rerender } = render(<Phase1View />)
+    render(<Phase1View />)
 
+    await user.click(screen.getByRole('button', { name: /Representation Learning/i }))
     expect(screen.getByRole('heading', { name: 'Representation Learning' })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /Embeddings/i }))
-    expect(mockedApi.selectTopic).toHaveBeenCalledWith('session-1', 'grandchild')
 
     vi.clearAllMocks()
-    await act(async () => {
-      setStoreSession(session)
-    })
-    rerender(<Phase1View />)
-    await user.click(screen.getByRole('button', { name: 'Machine Learning' }))
-    expect(mockedApi.back).toHaveBeenCalled()
-
-    useSessionStore.setState({ session, isLoading: true })
-    render(<Phase1View />)
-    expect(document.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0)
+    await user.click(screen.getByRole('button', { name: /Optimization/i }))
+    await user.click(screen.getByRole('button', { name: 'Expand' }))
+    expect(mockedApi.expandPhase1Topic).toHaveBeenCalledWith('session-1', 'child-b')
   })
 
-  it('ResolutionPicker selects compact and modal depth choices', async () => {
+  it('DeepDiveButton starts the roadmap from the selected node', async () => {
     const user = userEvent.setup()
     setStoreSession(makeSession())
-    mockedApi.setResolution.mockResolvedValue(makeSession({ resolution: 'technical' }))
-    const onClose = vi.fn()
-
-    render(<ResolutionPicker compact />)
-    await user.click(screen.getByRole('button', { name: 'Technical' }))
-    expect(mockedApi.setResolution).toHaveBeenCalledWith('session-1', 'technical')
-
-    cleanup()
-    render(<ResolutionPicker onClose={onClose} />)
-    await user.click(screen.getByRole('button', { name: /Intuitive Concepts/ }))
-    expect(mockedApi.setResolution).toHaveBeenCalledWith('session-1', 'intuitive')
-    expect(onClose).toHaveBeenCalled()
-  })
-
-  it('DeepDiveButton prompts for resolution or starts the roadmap when resolution exists', async () => {
-    const user = userEvent.setup()
-    setStoreSession(makeSession())
-
-    const { rerender } = render(<Phase1View />)
-    await user.click(screen.getByRole('button', { name: 'Deep Dive →' }))
-    expect(screen.getByText('Choose your depth')).toBeInTheDocument()
-
-    setStoreSession(makeSession({ resolution: 'technical' }))
     mockedApi.deepDive.mockResolvedValue({ session: makePhase2Session() })
     mockedStreamSSE.mockImplementation(async function* () {})
-    rerender(<Phase1View />)
 
+    render(<Phase1View />)
+
+    await user.click(screen.getByRole('button', { name: 'Machine Learning' }))
     await user.click(screen.getByRole('button', { name: 'Deep Dive →' }))
     expect(mockedApi.deepDive).toHaveBeenCalledWith('session-1', 'root')
     expect(mockedStreamSSE).toHaveBeenCalled()
   })
 
-  it('Phase2Node shows resource state and dispatches learn, chat, and prune actions', async () => {
+  it('Phase2Node shows resource state and opens the node details sidebar', async () => {
     const user = userEvent.setup()
     const session = makePhase2Session()
     setStoreSession(session)
-    mockedApi.updateNodeState.mockImplementation(async () => useSessionStore.getState().session as Session)
-    mockedApi.deleteNode.mockResolvedValue({ removed_node_ids: ['goal'] })
 
     render(<Phase2Node data={{ node: session.nodes.goal }} {...nodeProps('goal')} />)
 
     expect(screen.getByText('Representation Resource')).toBeInTheDocument()
-    expect(screen.getByText('mixed')).toBeInTheDocument()
+    expect(screen.getByText('Active module')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Mark as Learned' }))
-    expect(mockedApi.updateNodeState).toHaveBeenCalledWith('session-1', 'goal', 'learned')
-
-    await user.click(screen.getAllByRole('button')[1])
-    expect(useSessionStore.getState().chatOpenNodeId).toBe('goal')
+    await user.click(screen.getByRole('button', { name: /Representation Learning/i }))
+    expect(useSessionStore.getState().selectedPhase2NodeId).toBe('goal')
   })
 
-  it('GrayedNode explains prerequisites, expands unknown nodes, and labels known duplicates', async () => {
+  it('GrayedNode activates, removes, and labels known duplicates', async () => {
     const user = userEvent.setup()
     const session = makePhase2Session()
     setStoreSession(session)
-    mockedApi.explainNode.mockResolvedValue({ explain_more_text: 'Vector spaces help embeddings make sense.' })
     mockedStreamSSE.mockImplementation(async function* () {})
+    mockedApi.deleteNode.mockResolvedValue({ removed_node_ids: ['prereq'] })
 
-    const { rerender } = render(
+    render(
       <GrayedNode data={{ node: session.nodes.prereq }} {...nodeProps('prereq')} />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Explain more' }))
-    await waitFor(() => expect(mockedApi.explainNode).toHaveBeenCalledWith('session-1', 'prereq'))
-    rerender(
-      <GrayedNode
-        data={{ node: (useSessionStore.getState().session as Session).nodes.prereq }}
-        {...nodeProps('prereq')}
-      />,
-    )
-    expect(screen.getByText('Vector spaces help embeddings make sense.')).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: "Don't know" }))
+    await user.click(screen.getByRole('button', { name: 'Activate Vector Spaces' }))
     expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/prereq/expand', {})
+
+    await user.click(screen.getByRole('button', { name: 'Remove Vector Spaces' }))
+    expect(mockedApi.deleteNode).toHaveBeenCalledWith('session-1', 'prereq')
 
     render(
       <GrayedNode
@@ -220,7 +250,7 @@ describe('frontend components', () => {
         {...nodeProps('duplicate')}
       />,
     )
-    expect(screen.getByText('✓ Already learned')).toBeInTheDocument()
+    expect(screen.getByText('Learned elsewhere')).toBeInTheDocument()
   })
 
   it('GraphCanvas renders the Phase 2 graph chrome and Back control', async () => {
@@ -230,9 +260,9 @@ describe('frontend components', () => {
 
     render(<GraphCanvas />)
 
-    expect(screen.getByTestId('react-flow')).toHaveAttribute('data-nodes', '3')
+    await waitFor(() => expect(screen.getByTestId('react-flow')).toHaveAttribute('data-nodes', '3'))
     expect(screen.getByTestId('react-flow')).toHaveAttribute('data-edges', '1')
-    expect(screen.getByText('Representation Learning')).toBeInTheDocument()
+    expect(screen.getAllByText('Representation Learning').length).toBeGreaterThan(0)
 
     await user.click(screen.getByRole('button', { name: 'Back to start' }))
     expect(useSessionStore.getState().session).toBeNull()

@@ -1,17 +1,20 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #f4f4ef;
+  --bg: #edf3e7;
   --paper: #fbfaf5;
   --panel: #eef2f6;
-  --ink: #18212d;
-  --muted: #5d6773;
-  --muted-strong: #6b7280;
-  --line: #d8dee8;
-  --accent: #bf5b2c;
-  --accent-soft: #f6e1d5;
+  --ink: #163122;
+  --muted: #556558;
+  --muted-strong: #4f5f52;
+  --line: #cad8ca;
+  --accent: #5e7f5f;
+  --accent-soft: #dcead8;
+  --leaf: #6f9268;
+  --leaf-deep: #274731;
+  --leaf-soft: #e5efe0;
   --danger: #b42318;
-  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-family: "Optima", "Avenir Next", "Segoe UI", sans-serif;
   color: var(--ink);
   background: var(--bg);
   font-synthesis: none;
@@ -35,7 +38,11 @@ body {
 }
 
 .font-serif-display {
-  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+  font-family: "Baskerville", "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+}
+
+.font-sans-display {
+  font-family: "Optima", "Avenir Next", "Segoe UI", sans-serif;
 }
 
 button,
