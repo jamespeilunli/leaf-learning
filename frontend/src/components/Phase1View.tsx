@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { Network, Sparkles } from 'lucide-react'
+import { ArrowLeft, Loader2, Network, Sparkles } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
 import type { ForceGraphMethods } from 'react-force-graph-2d'
 
 import { useSessionStore } from '../store/useSessionStore'
 import type { GraphNode } from '../types'
 import { DeepDiveButton } from './DeepDiveButton'
+import { wrapCanvasText } from './phase1CanvasText'
+import { Button, Eyebrow, Panel, StatusNotice } from './ui'
 
 type TopicNode = GraphNode & {
   color: string
@@ -78,36 +80,6 @@ function roundRect(
   ctx.closePath()
 }
 
-function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines = 3) {
-  const words = text.split(/\s+/)
-  const lines: string[] = []
-  let line = ''
-
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word
-    if (ctx.measureText(candidate).width <= maxWidth) {
-      line = candidate
-      continue
-    }
-
-    if (line) lines.push(line)
-    line = word
-    if (lines.length === maxLines - 1) break
-  }
-
-  if (line && lines.length < maxLines) lines.push(line)
-  if (words.length && lines.length === maxLines) {
-    const last = lines[maxLines - 1]
-    let trimmed = last
-    while (ctx.measureText(`${trimmed}...`).width > maxWidth && trimmed.length > 4) {
-      trimmed = trimmed.slice(0, -1)
-    }
-    lines[maxLines - 1] = `${trimmed}...`
-  }
-
-  return lines
-}
-
 function drawTopicNode(
   node: TopicNode,
   ctx: CanvasRenderingContext2D,
@@ -121,7 +93,8 @@ function drawTopicNode(
   const radius = 8
   const selected = node.id === selectedNodeId
   const fontSize = Math.max(9, 13 / Math.sqrt(globalScale))
-  const labelLines = wrapText(ctx, node.label, width - 38, 3)
+  const labelMaxWidth = width - 38
+  const labelMaxLines = node.isRoot ? 3 : 2
 
   if (node.isNew) {
     ctx.beginPath()
@@ -146,6 +119,8 @@ function drawTopicNode(
   ctx.font = `600 ${fontSize}px Avenir Next, Segoe UI, sans-serif`
   ctx.textAlign = 'left'
   ctx.textBaseline = 'top'
+
+  const labelLines = wrapCanvasText(ctx, node.label, labelMaxWidth, labelMaxLines)
 
   labelLines.forEach((line, index) => {
     ctx.fillText(line, x - width / 2 + 30, y - height / 2 + 12 + index * (fontSize + 3))
@@ -209,6 +184,8 @@ export function Phase1View() {
   const session = useSessionStore((state) => state.session)
   const isLoading = useSessionStore((state) => state.isLoading)
   const expandPhase1Topic = useSessionStore((state) => state.expandPhase1Topic)
+  const restartFlow = useSessionStore((state) => state.restartFlow)
+  const error = useSessionStore((state) => state.error)
   const graphRef = useRef<ForceGraphMethods | null>(null)
   const nodeCacheRef = useRef<Map<string, TopicNode>>(new Map())
   const previousNodeIdsRef = useRef<Set<string>>(new Set())
@@ -355,21 +332,39 @@ export function Phase1View() {
   }
 
   return (
-    <main className="h-screen overflow-hidden bg-[var(--bg)] text-[var(--ink)]">
-      <div className="grid h-full min-h-0 lg:grid-cols-[minmax(0,1fr)_380px]">
+    <main className="min-h-screen overflow-y-auto bg-[var(--bg)] text-[var(--ink)] lg:h-screen lg:overflow-hidden">
+      <div className="grid min-h-screen lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_400px]">
         <section
           ref={containerRef}
-          className="relative h-[62vh] min-h-[460px] overflow-hidden bg-[radial-gradient(circle_at_20%_18%,rgba(14,165,233,0.16),transparent_30%),radial-gradient(circle_at_80%_16%,rgba(191,91,44,0.14),transparent_28%),linear-gradient(180deg,#fbfaf5_0%,#eef2f6_100%)] lg:h-full"
+          className="relative h-[58svh] min-h-[430px] overflow-hidden bg-[linear-gradient(135deg,rgba(255,253,247,0.96)_0%,rgba(237,241,236,0.98)_62%,rgba(220,236,240,0.62)_100%)] lg:h-full"
         >
-          <div className="pointer-events-none absolute left-5 top-5 z-10 flex items-center gap-3 rounded-[8px] border border-white/70 bg-white/80 px-4 py-3 shadow-[0_16px_42px_rgba(24,33,45,0.12)] backdrop-blur">
-            <div className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-[var(--ink)] text-white">
-              <Network size={18} />
+          <div className="pointer-events-none absolute left-4 right-4 top-4 z-10 flex flex-wrap items-start justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3 rounded-[var(--radius-sm)] border border-white/75 bg-white/84 px-4 py-3 shadow-[0_16px_42px_rgba(24,33,45,0.12)] backdrop-blur">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--ink)] text-white">
+                <Network aria-hidden="true" size={18} />
+              </div>
+              <div className="min-w-0">
+                <Eyebrow>Web of knowledge</Eyebrow>
+                <h1 className="max-w-[62vw] truncate font-serif-display text-2xl leading-7 lg:max-w-[44vw]">
+                  {session.root_topic}
+                </h1>
+              </div>
             </div>
-            <div>
-              <p className="text-xs font-semibold uppercase text-[var(--muted)]">Web of Knowledge</p>
-              <h1 className="max-w-[44vw] truncate font-serif-display text-2xl leading-7">
-                {session.root_topic}
-              </h1>
+            <div className="pointer-events-auto flex items-center gap-2">
+              {isLoading ? (
+                <div className="inline-flex h-10 items-center gap-2 rounded-[var(--radius-sm)] border border-white/70 bg-white/82 px-3 text-sm font-semibold text-[var(--muted-strong)] shadow-sm backdrop-blur">
+                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                  Mapping
+                </div>
+              ) : null}
+              <Button
+                leftIcon={<ArrowLeft aria-hidden="true" className="h-4 w-4" />}
+                size="sm"
+                variant="secondary"
+                onClick={restartFlow}
+              >
+                Start
+              </Button>
             </div>
           </div>
 
@@ -411,21 +406,25 @@ export function Phase1View() {
           />
         </section>
 
-        <aside className="flex min-h-0 flex-col border-l border-[var(--line)] bg-[var(--paper)]">
+        <aside className="flex min-h-[42svh] flex-col border-t border-[var(--line)] bg-[var(--paper)] lg:min-h-0 lg:border-l lg:border-t-0">
           <div className="border-b border-[var(--line)] px-6 py-5">
-            <p className="text-xs font-semibold uppercase text-[var(--muted)]">Phase 1</p>
+            <Eyebrow>Phase 1</Eyebrow>
             <h2 className="mt-1 font-serif-display text-3xl leading-9">Explore before you commit</h2>
+            <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+              Select a node to inspect it, expand promising directions, or enter the roadmap view.
+            </p>
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+            {error ? <StatusNotice className="mb-5" tone="error">{error}</StatusNotice> : null}
             {selectedNode ? (
               <div>
                 <div className="flex items-start gap-3">
-                  <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-[var(--accent-soft)] text-[var(--accent)]">
-                    <Sparkles size={18} />
+                  <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--accent-soft)] text-[var(--accent)]">
+                    <Sparkles aria-hidden="true" size={18} />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase text-[var(--muted)]">Selected topic</p>
+                    <Eyebrow>Selected topic</Eyebrow>
                     <h3 className="mt-1 break-words text-2xl font-semibold leading-8">
                       {selectedNode.label}
                     </h3>
@@ -450,10 +449,11 @@ export function Phase1View() {
                 </div>
 
                 <div className="mt-7 flex flex-col gap-3">
-                  <button
-                    className="rounded-[8px] border border-[var(--line)] bg-white px-4 py-3 text-sm font-semibold text-[var(--ink)] transition hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[var(--panel)] disabled:text-[var(--muted)]"
+                  <Button
                     disabled={hasExpanded || isLoading}
+                    isLoading={expandingNodeId === selectedNode.id}
                     type="button"
+                    variant="secondary"
                     onClick={() => void handleExpand()}
                   >
                     {hasExpanded
@@ -461,7 +461,7 @@ export function Phase1View() {
                       : expandingNodeId === selectedNode.id
                         ? 'Expanding...'
                         : 'Expand'}
-                  </button>
+                  </Button>
                   <DeepDiveButton nodeId={selectedNode.id} />
                 </div>
               </div>
@@ -474,20 +474,20 @@ export function Phase1View() {
                 </p>
 
                 <div className="mt-6 grid grid-cols-2 gap-3">
-                  <div className="rounded-[8px] border border-[var(--line)] bg-white p-4">
+                  <Panel className="p-4 shadow-none">
                     <div className="text-2xl font-semibold">{phase1Nodes.length}</div>
                     <div className="mt-1 text-xs font-medium text-[var(--muted)]">Topics mapped</div>
-                  </div>
-                  <div className="rounded-[8px] border border-[var(--line)] bg-white p-4">
+                  </Panel>
+                  <Panel className="p-4 shadow-none">
                     <div className="text-2xl font-semibold">{graphData.links.length}</div>
                     <div className="mt-1 text-xs font-medium text-[var(--muted)]">Connections</div>
-                  </div>
+                  </Panel>
                 </div>
 
                 {isLoading ? (
-                  <div className="mt-6 rounded-[8px] border border-[var(--line)] bg-white p-4 text-sm font-medium text-[var(--muted)]">
+                  <StatusNotice className="mt-6" tone="loading">
                     Expanding the web...
-                  </div>
+                  </StatusNotice>
                 ) : null}
               </div>
             )}

@@ -1,4 +1,7 @@
+import { ChevronRight } from 'lucide-react'
+
 import { useSessionStore } from '../store/useSessionStore'
+import { Button } from './ui'
 
 interface DeepDiveButtonProps {
   nodeId: string
@@ -17,12 +20,12 @@ export function DeepDiveButton({ nodeId }: DeepDiveButtonProps) {
   }
 
   return (
-    <button
-      className="rounded-full bg-[var(--ink)] px-5 py-3 text-sm font-semibold text-[var(--paper)] transition hover:bg-[var(--accent)]"
+    <Button
+      rightIcon={<ChevronRight aria-hidden="true" className="h-4 w-4" />}
       type="button"
       onClick={() => void handleDeepDive()}
     >
-      Deep Dive →
-    </button>
+      Deep Dive
+    </Button>
   )
 }
