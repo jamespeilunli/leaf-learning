@@ -4,6 +4,7 @@ import axios from 'axios'
 import { ReactFlowProvider } from 'reactflow'
 
 import { GraphCanvas } from './components/GraphCanvas'
+import { NodeChatPanel } from './components/NodeChatPanel'
 import { Phase1View } from './components/Phase1View'
 import { Phase2Sidebar } from './components/Phase2Sidebar'
 import { StartScreen } from './components/StartScreen'
@@ -38,6 +39,7 @@ function App() {
       <ReactFlowProvider>
         <GraphCanvas />
         <Phase2Sidebar />
+        <NodeChatPanel />
       </ReactFlowProvider>
     </main>
   )

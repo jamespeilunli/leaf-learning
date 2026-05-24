@@ -12,6 +12,7 @@ import { NodeChatPanel } from './NodeChatPanel'
 import { Phase1OptionCard } from './Phase1OptionCard'
 import { Phase1View } from './Phase1View'
 import { Phase2Node } from './Phase2Node'
+import { Phase2Sidebar } from './Phase2Sidebar'
 import { StartScreen } from './StartScreen'
 import { SESSION_STORAGE_KEY, useSessionStore } from '../store/useSessionStore'
 import { makeNode, makePhase2Session, makeSession } from '../test/fixtures'
@@ -208,9 +209,22 @@ describe('frontend components', () => {
     render(<Phase1View />)
 
     await user.click(screen.getByRole('button', { name: 'Machine Learning' }))
-    await user.click(screen.getByRole('button', { name: 'Deep Dive →' }))
+    await user.click(screen.getByRole('button', { name: 'Deep Dive' }))
     expect(mockedApi.deepDive).toHaveBeenCalledWith('session-1', 'root')
     expect(mockedStreamSSE).toHaveBeenCalled()
+  })
+
+  it('Phase2Sidebar exposes node actions and opens node chat', async () => {
+    const user = userEvent.setup()
+    const session = makePhase2Session()
+    setStoreSession(session)
+    useSessionStore.setState({ selectedPhase2NodeId: 'goal' })
+
+    render(<Phase2Sidebar />)
+
+    expect(screen.getByRole('heading', { name: 'Representation Learning' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Ask' }))
+    expect(useSessionStore.getState().chatOpenNodeId).toBe('goal')
   })
 
   it('Phase2Node shows resource state and opens the node details sidebar', async () => {
