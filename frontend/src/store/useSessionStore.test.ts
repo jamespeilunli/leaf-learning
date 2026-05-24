@@ -198,6 +198,57 @@ describe('useSessionStore', () => {
     expect(getState().streamingNodeIds.has('goal')).toBe(false)
   })
 
+  it('applies prefetched reveal updates without exposing hidden grandchildren', async () => {
+    const session = makePhase2Session({
+      nodes: {
+        goal: makeNode({
+          id: 'goal',
+          label: 'Representation Learning',
+          phase: '2',
+          node_state: 'expanded',
+          child_ids: ['prereq'],
+        }),
+        prereq: makeNode({
+          id: 'prereq',
+          label: 'Vector Spaces',
+          phase: '2',
+          node_state: 'grayed',
+          parent_id: 'goal',
+          depth: 1,
+          is_visible: false,
+          child_ids: ['basis'],
+        }),
+        basis: makeNode({
+          id: 'basis',
+          label: 'Basis Vectors',
+          phase: '2',
+          node_state: 'grayed',
+          parent_id: 'prereq',
+          depth: 2,
+          is_visible: false,
+        }),
+      },
+      edges: [{ id: 'edge-prereq', from: 'goal', to: 'prereq', label: 'requires' }],
+    })
+    useSessionStore.setState({ sessionId: 'session-1', session })
+    mockedStreamSSE.mockImplementation(async function* () {
+      yield {
+        event: 'node_updated',
+        data: { ...session.nodes.goal, is_visible: true, node_state: 'expanded' },
+      }
+      yield { event: 'node_added', data: { ...session.nodes.prereq, is_visible: true } }
+      yield { event: 'edge_added', data: session.edges[0] }
+      yield { event: 'stream_done', data: {} }
+    })
+
+    await getState().expandNode('goal')
+
+    const updated = getState().session as Session
+    expect(updated.nodes.prereq.is_visible).toBe(true)
+    expect(updated.nodes.basis.is_visible).toBe(false)
+    expect(updated.nodes.goal.node_state).toBe('expanded')
+  })
+
   it('explains grayed nodes, marks learned duplicates, and prunes subtrees', async () => {
     const session = makePhase2Session()
     useSessionStore.setState({ sessionId: 'session-1', session })

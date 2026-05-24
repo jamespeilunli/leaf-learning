@@ -27,6 +27,7 @@ export interface GraphNode {
   depth: number
   chat_history: ChatMessage[]
   explain_more_text: string | null
+  is_visible: boolean
 }
 
 export interface GraphEdge {

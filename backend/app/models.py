@@ -46,6 +46,7 @@ class GraphNode(BaseModel):
     depth: int = 0
     chat_history: list[ChatMessage] = Field(default_factory=list)
     explain_more_text: str | None = None
+    is_visible: bool = True
 
     @model_validator(mode="after")
     def backfill_sources_from_resource(self) -> "GraphNode":

@@ -97,20 +97,22 @@ export function GraphCanvas() {
   const graphNodes = useMemo(() => {
     if (!session) return []
     return Object.values(session.nodes).filter(
-      (node) => node.phase === '2' || node.id === session.focus_node_id,
+      (node) => (node.phase === '2' || node.id === session.focus_node_id) && node.is_visible,
     )
   }, [session])
 
   const rfEdges = useMemo<RFEdge[]>(() => {
     if (!session) return []
-    return session.edges.map((edge) => ({
-      id: edge.id,
-      source: edge.to,
-      target: edge.from,
-      type: 'smoothstep',
-      markerEnd: { type: MarkerType.ArrowClosed, color: '#334155', width: 18, height: 18 },
-      style: { strokeWidth: 1.6, stroke: '#334155' },
-    }))
+    return session.edges
+      .filter((edge) => session.nodes[edge.from]?.is_visible && session.nodes[edge.to]?.is_visible)
+      .map((edge) => ({
+        id: edge.id,
+        source: edge.to,
+        target: edge.from,
+        type: 'smoothstep',
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#334155', width: 18, height: 18 },
+        style: { strokeWidth: 1.6, stroke: '#334155' },
+      }))
   }, [session])
 
   useEffect(() => {

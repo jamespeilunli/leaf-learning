@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 
 from app.ai import expand_phase2_node
 from app.models import GraphEdge, GraphNode, Resource, Session
@@ -41,6 +42,7 @@ async def prefetch_phase2_tree(
     session: Session,
     start_node: GraphNode,
     goal_label: str,
+    on_progress: Callable[[Session], None] | None = None,
 ) -> None:
     """Generate hidden Phase 2 descendants breadth-first up to the focus-relative cap."""
     max_depth = phase2_max_depth(session)
@@ -58,7 +60,9 @@ async def prefetch_phase2_tree(
             continue
 
         if not node.child_ids:
-            await _generate_direct_children(session, node, goal_label)
+            await generate_direct_phase2_children(session, node, goal_label)
+            if on_progress:
+                on_progress(session)
 
         for child_id in node.child_ids:
             child = session.nodes.get(child_id)
@@ -66,7 +70,7 @@ async def prefetch_phase2_tree(
                 queue.append(child_id)
 
 
-async def _generate_direct_children(session: Session, node: GraphNode, goal_label: str) -> None:
+async def generate_direct_phase2_children(session: Session, node: GraphNode, goal_label: str) -> None:
     blocked_labels = _ancestor_labels(session, node) | _existing_child_labels(session, node)
     known_topics = sorted(set(session.known_topics) | blocked_labels)
 
@@ -109,6 +113,23 @@ async def _generate_direct_children(session: Session, node: GraphNode, goal_labe
         node.child_ids.append(child.id)
         session.edges.append(GraphEdge(from_id=node.id, to_id=child.id, label="requires"))
         blocked_labels.add(child_label)
+
+
+async def prefetch_child_layers(
+    session: Session,
+    node: GraphNode,
+    goal_label: str,
+    on_progress: Callable[[Session], None] | None = None,
+) -> None:
+    max_depth = phase2_max_depth(session)
+
+    for child_id in node.child_ids:
+        child = session.nodes.get(child_id)
+        if not child or child.phase != "2" or child.depth >= max_depth or child.child_ids:
+            continue
+        await generate_direct_phase2_children(session, child, goal_label)
+        if on_progress:
+            on_progress(session)
 
 
 def reveal_direct_phase2_children(session: Session, node: GraphNode) -> tuple[list[GraphNode], list[GraphEdge]]:

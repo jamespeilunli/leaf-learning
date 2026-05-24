@@ -154,11 +154,18 @@ def set_resolution(session_id: str) -> dict:
 
 
 @router.post("/session/{session_id}/deep-dive")
-def deep_dive(session_id: str, payload: DeepDiveRequest) -> dict:
+async def deep_dive(session_id: str, payload: DeepDiveRequest) -> dict:
     session = load_session(session_id)
     node = _get_node(session, payload.node_id)
     session.focus_node_id = payload.node_id
     session.phase = "2"
     node.phase = "2"
+    node.node_state = "expanded"
+    node.is_visible = True
+    node.child_ids = [
+        child_id
+        for child_id in node.child_ids
+        if child_id in session.nodes and session.nodes[child_id].phase == "2"
+    ]
     save_session(session)
     return {"session": session.model_dump(by_alias=True)}

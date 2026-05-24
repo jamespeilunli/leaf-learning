@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Iterable
 
@@ -9,6 +10,11 @@ from pydantic import BaseModel
 
 from app.ai import expand_phase2_node, explain_prerequisite, suggest_prerequisite
 from app.models import GraphEdge, GraphNode, Resource, Session
+from app.phase2_prefetch import (
+    phase2_max_depth,
+    prefetch_phase2_tree,
+    reveal_direct_phase2_children,
+)
 from app.storage import load_session, save_session
 
 
@@ -53,6 +59,19 @@ def _collect_descendants(session: Session, node_id: str) -> set[str]:
     return collected
 
 
+async def _prefetch_descendants(session_id: str, start_node_ids: list[str], goal_label: str) -> None:
+    try:
+        session = load_session(session_id)
+        for start_node_id in start_node_ids:
+            start_node = session.nodes.get(start_node_id)
+            if not start_node:
+                continue
+            await prefetch_phase2_tree(session, start_node, goal_label, on_progress=save_session)
+        save_session(session)
+    except Exception:
+        return
+
+
 @router.post("/session/{session_id}/node/{node_id}/expand")
 async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
     session = load_session(session_id)
@@ -62,15 +81,34 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
     if node.node_state != "grayed" and node.id != session.focus_node_id:
         raise HTTPException(status_code=400, detail="Node is not expandable.")
     node.node_state = "expanded"
+    node.phase = "2"
+    node.is_visible = True
     save_session(session)
     goal_label = _get_node(session, session.focus_node_id).label
 
     async def event_stream() -> Iterable[str]:
-        async for event in expand_phase2_node(
-            node.label,
-            session.known_topics,
-            goal_label,
-        ):
+        if node.child_ids:
+            revealed_nodes, revealed_edges = reveal_direct_phase2_children(session, node)
+            save_session(session)
+            asyncio.create_task(
+                _prefetch_descendants(session.id, [child.id for child in revealed_nodes], goal_label)
+            )
+            yield _sse("node_updated", node.model_dump(by_alias=True))
+            for child in revealed_nodes:
+                yield _sse("node_added", child.model_dump(by_alias=True))
+            for edge in revealed_edges:
+                yield _sse("edge_added", edge.model_dump(by_alias=True))
+            yield _sse("stream_done", {})
+            return
+
+        if node.depth >= phase2_max_depth(session):
+            save_session(session)
+            yield _sse("node_updated", node.model_dump(by_alias=True))
+            yield _sse("stream_done", {})
+            return
+
+        revealed_node_ids: list[str] = []
+        async for event in expand_phase2_node(node.label, session.known_topics, goal_label):
             event_name = event["event"]
             data = event["data"]
 
@@ -82,8 +120,7 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
                     if not node.sources:
                         node.sources = [node.resource]
                 save_session(session)
-                payload = {"id": node.id, **data}
-                yield _sse("node_updated", payload)
+                yield _sse("node_updated", {"id": node.id, **data})
                 continue
 
             if event_name == "node_added":
@@ -92,9 +129,11 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
                 child.depth = node.depth + 1
                 child.phase = "2"
                 child.node_state = "grayed"
+                child.is_visible = True
                 session.nodes[child.id] = child
                 if child.id not in node.child_ids:
                     node.child_ids.append(child.id)
+                revealed_node_ids.append(child.id)
                 save_session(session)
                 yield _sse("node_added", child.model_dump(by_alias=True))
                 continue
@@ -110,6 +149,8 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
             save_session(session)
             yield _sse(event_name, data)
             if event_name in {"stream_done", "stream_error"}:
+                if event_name == "stream_done" and revealed_node_ids:
+                    asyncio.create_task(_prefetch_descendants(session.id, revealed_node_ids, goal_label))
                 return
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

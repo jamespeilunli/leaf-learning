@@ -202,7 +202,20 @@ describe('frontend components', () => {
   it('DeepDiveButton starts the roadmap from the selected node', async () => {
     const user = userEvent.setup()
     setStoreSession(makeSession())
-    mockedApi.deepDive.mockResolvedValue({ session: makePhase2Session() })
+    mockedApi.deepDive.mockResolvedValue({
+      session: makePhase2Session({
+        focus_node_id: 'root',
+        nodes: {
+          root: makeNode({
+            id: 'root',
+            label: 'Machine Learning',
+            phase: '2',
+            node_state: 'expanded',
+          }),
+        },
+        edges: [],
+      }),
+    })
     mockedStreamSSE.mockImplementation(async function* () {})
 
     render(<Phase1View />)
@@ -210,7 +223,8 @@ describe('frontend components', () => {
     await user.click(screen.getByRole('button', { name: 'Machine Learning' }))
     await user.click(screen.getByRole('button', { name: 'Deep Dive →' }))
     expect(mockedApi.deepDive).toHaveBeenCalledWith('session-1', 'root')
-    expect(mockedStreamSSE).toHaveBeenCalled()
+    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/root/expand', {})
+    expect(useSessionStore.getState().session?.phase).toBe('2')
   })
 
   it('Phase2Node shows resource state and opens the node details sidebar', async () => {
@@ -255,7 +269,19 @@ describe('frontend components', () => {
 
   it('GraphCanvas renders the Phase 2 graph chrome and Back control', async () => {
     const user = userEvent.setup()
-    setStoreSession(makePhase2Session())
+    const session = makePhase2Session()
+    session.nodes.hidden = makeNode({
+      id: 'hidden',
+      label: 'Hidden Fundamental',
+      phase: '2',
+      node_state: 'grayed',
+      parent_id: 'prereq',
+      depth: 2,
+      is_visible: false,
+    })
+    session.nodes.prereq.child_ids = ['hidden']
+    session.edges.push({ id: 'edge-hidden', from: 'prereq', to: 'hidden', label: 'requires' })
+    setStoreSession(session)
     localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
 
     render(<GraphCanvas />)
@@ -263,6 +289,7 @@ describe('frontend components', () => {
     await waitFor(() => expect(screen.getByTestId('react-flow')).toHaveAttribute('data-nodes', '3'))
     expect(screen.getByTestId('react-flow')).toHaveAttribute('data-edges', '1')
     expect(screen.getAllByText('Representation Learning').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Hidden Fundamental')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Back to start' }))
     expect(useSessionStore.getState().session).toBeNull()

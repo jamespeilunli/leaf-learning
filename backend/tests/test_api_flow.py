@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from app.ai import using_mock_ai
-from app.models import GraphNode
+from app.models import GraphEdge, GraphNode
 from app.storage import load_session, save_session
 
 from tests.helpers import isolated_sessions_dir, parse_sse, test_client
@@ -26,7 +26,7 @@ class ApiFlowTests(unittest.TestCase):
         return payload["session_id"], payload["session"]
 
     def test_test_client_forces_mock_ai_mode(self) -> None:
-        with patch.dict("os.environ", {"ALPHAG3N_AI_MODE": "openai"}):
+        with patch.dict("os.environ", {"ALPHAG3N_AI_MODE": "openai", "ALPHAG3N_USE_OPENAI": "true"}):
             self.client = test_client()
             session_id, session = self.create_machine_learning_session()
 
@@ -39,7 +39,11 @@ class ApiFlowTests(unittest.TestCase):
     def test_test_client_stays_mock_when_real_ai_tests_are_enabled(self) -> None:
         with patch.dict(
             "os.environ",
-            {"ALPHAG3N_AI_MODE": "openai", "ALPHAG3N_TEST_ALLOW_REAL_AI": "1"},
+            {
+                "ALPHAG3N_AI_MODE": "openai",
+                "ALPHAG3N_USE_OPENAI": "true",
+                "ALPHAG3N_TEST_ALLOW_REAL_AI": "1",
+            },
         ):
             self.client = test_client()
             session_id, session = self.create_machine_learning_session()
@@ -77,6 +81,70 @@ class ApiFlowTests(unittest.TestCase):
         self.assertEqual(dived["phase"], "2")
         self.assertEqual(dived["focus_node_id"], child_id)
         self.assertEqual(dived["nodes"][child_id]["phase"], "2")
+        self.assertTrue(dived["nodes"][child_id]["is_visible"])
+
+    def test_deep_dive_returns_immediately_and_expand_reveals_next_layer(self) -> None:
+        session_id, session = self.create_machine_learning_session()
+        root_id = session["current_phase1_node_id"]
+        child_id = session["nodes"][root_id]["child_ids"][0]
+
+        dived = self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id}).json()["session"]
+        focus = dived["nodes"][child_id]
+
+        self.assertEqual(focus["child_ids"], [])
+        self.assertTrue(focus["is_visible"])
+
+        expand_response = self.client.post(f"/api/session/{session_id}/node/{child_id}/expand")
+        events = parse_sse(expand_response.text)
+        revealed_ids = [data["id"] for name, data in events if name == "node_added"]
+        event_names = [name for name, _ in events]
+
+        self.assertIn("node_updated", event_names)
+        self.assertGreaterEqual(len(revealed_ids), 2)
+
+        expanded = self.client.get(f"/api/session/{session_id}").json()
+        self.assertEqual(set(expanded["nodes"][child_id]["child_ids"]), set(revealed_ids))
+        self.assertTrue(all(expanded["nodes"][node_id]["is_visible"] for node_id in revealed_ids))
+        self.assertLessEqual(
+            max(node["depth"] - focus["depth"] for node in expanded["nodes"].values() if node["phase"] == "2"),
+            6,
+        )
+
+    def test_expanding_prefetched_node_reveals_without_ai_generation(self) -> None:
+        session_id, session = self.create_machine_learning_session()
+        root_id = session["current_phase1_node_id"]
+        child_id = session["nodes"][root_id]["child_ids"][0]
+        self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id})
+
+        stored = load_session(session_id)
+        hidden = GraphNode(
+            label="Prefetched Hidden Layer",
+            description="Already generated before the user clicked.",
+            phase="2",
+            node_state="grayed",
+            parent_id=child_id,
+            depth=stored.nodes[child_id].depth + 1,
+            is_visible=False,
+        )
+        stored.nodes[hidden.id] = hidden
+        stored.nodes[child_id].child_ids.append(hidden.id)
+        stored.edges.append(GraphEdge(from_id=child_id, to_id=hidden.id, label="requires"))
+        save_session(stored)
+
+        async def noop_prefetch(*args, **kwargs) -> None:
+            return None
+
+        with (
+            patch("app.routers.graph._prefetch_descendants", side_effect=noop_prefetch),
+            patch("app.phase2_prefetch.expand_phase2_node", side_effect=AssertionError("AI generation was called")),
+        ):
+            expand_response = self.client.post(f"/api/session/{session_id}/node/{child_id}/expand")
+
+        events = parse_sse(expand_response.text)
+        self.assertEqual(expand_response.status_code, 200)
+        self.assertIn(("node_added", self.client.get(f"/api/session/{session_id}").json()["nodes"][hidden.id]), events)
+        expanded = self.client.get(f"/api/session/{session_id}").json()
+        self.assertTrue(expanded["nodes"][hidden.id]["is_visible"])
 
     def test_phase2_expand_explain_learned_dedupe_and_prune(self) -> None:
         session_id, session = self.create_machine_learning_session()
@@ -121,7 +189,7 @@ class ApiFlowTests(unittest.TestCase):
         self.assertEqual(learned["nodes"][duplicate.id]["explain_more_text"], "__known__")
 
         pruned = self.client.delete(f"/api/session/{session_id}/node/{first_prereq_id}").json()
-        self.assertEqual(pruned["removed_node_ids"], [first_prereq_id])
+        self.assertIn(first_prereq_id, pruned["removed_node_ids"])
         after_prune = self.client.get(f"/api/session/{session_id}").json()
         self.assertNotIn(first_prereq_id, after_prune["nodes"])
         self.assertNotIn(first_prereq_id, after_prune["nodes"][child_id]["child_ids"])

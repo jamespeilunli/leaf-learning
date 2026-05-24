@@ -20,6 +20,7 @@ class ModelAndStorageTests(unittest.TestCase):
         self.assertEqual(node.node_state, "grayed")
         self.assertEqual(node.child_ids, [])
         self.assertEqual(node.chat_history, [])
+        self.assertTrue(node.is_visible)
         self.assertIsNotNone(message.created_at)
         self.assertEqual(session.phase, "1")
         self.assertIn("from", edge.model_dump(by_alias=True))

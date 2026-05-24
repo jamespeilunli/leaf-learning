@@ -15,6 +15,7 @@ from app.main import app
 
 def configure_test_ai_mode() -> None:
     os.environ["ALPHAG3N_AI_MODE"] = "mock"
+    os.environ["ALPHAG3N_USE_OPENAI"] = "false"
 
 
 @contextmanager

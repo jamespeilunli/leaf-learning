@@ -11,7 +11,7 @@ from app import mock_ai
 from app.models import ChatMessage, GraphEdge, GraphNode, Resource
 
 
-MODEL = "gpt-4o"
+MODEL = "gpt-5.4-mini"
 API_KEY_PLACEHOLDER = "sk-your-key-here"
 _client: AsyncOpenAI | None = None
 ParsedResponseT = TypeVar("ParsedResponseT", bound=BaseModel)
@@ -33,8 +33,8 @@ class Phase2Prerequisite(BaseModel):
 
 
 class Phase2ExpansionResponse(BaseModel):
-    sources: list[Resource] = Field(min_length=2, max_length=4)
     prerequisites: list[Phase2Prerequisite]
+    sources: list[Resource] = Field(min_length=2, max_length=4)
 
 
 class SuggestedPrerequisiteResponse(BaseModel):
@@ -254,13 +254,15 @@ async def expand_phase2_node(
 You are a learning roadmap assistant. The user's goal is to understand "{goal_label}".
 Explain topics at a technical level with formal, precise, mechanism-focused detail.
 
-Search for and read the best resources that genuinely explain "{node_label}" at this technical level.
-The resources must explain the topic in depth, not just introduce it.
+Return prerequisites first so the UI can stream graph nodes immediately.
+Then return sources.
 
-sources must contain 2 to 4 high-quality technical resources.
-Each source description must be 1 to 2 sentences on exactly what the resource covers and why it's useful.
-prerequisites must be topics directly used or assumed by these resources — not general background.
+prerequisites must contain 2 to 4 topics directly used or assumed by technical resources on this topic — not general background.
+Choose prerequisites as the next lower layer in a six-level path from the goal down toward fundamentals.
+For deeper prerequisite nodes, prefer more foundational concepts, so final leaf layers can be learned first and then used to climb back up to "{goal_label}".
 Each prerequisite hint must be 1 sentence explaining what this prerequisite is and why the resources use it.
+sources must contain 2 to 3 high-quality technical resources that explain "{node_label}" in depth.
+Each source description must be exactly 1 sentence on what the resource covers and why it's useful.
 Do NOT include any of these topics as prerequisites, the user already knows them: {known_topics}
 """.strip()
 
