@@ -64,6 +64,7 @@ type ExpandPatch = {
 interface SessionStore {
   sessionId: string | null
   session: Session | null
+  activeView: 'home' | 'phase1' | 'phase2'
   isLoading: boolean
   streamingNodeIds: Set<string>
   explainingNodeIds: Set<string>
@@ -77,6 +78,8 @@ interface SessionStore {
   expandPhase1Topic: (nodeId: string) => Promise<void>
   back: () => Promise<void>
   deepDive: (nodeId: string) => Promise<void>
+  showPhase1: () => void
+  returnHome: () => void
   expandNode: (nodeId: string) => Promise<void>
   explainNode: (nodeId: string) => Promise<void>
   markLearned: (nodeId: string) => Promise<void>
@@ -95,6 +98,7 @@ interface SessionStore {
 export const useSessionStore = create<SessionStore>((set, get) => ({
   sessionId: null,
   session: null,
+  activeView: 'home',
   isLoading: false,
   streamingNodeIds: new Set<string>(),
   explainingNodeIds: new Set<string>(),
@@ -111,6 +115,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       set({
         sessionId: data.session_id,
         session: data.session,
+        activeView: data.session.phase === '2' ? 'phase2' : 'phase1',
         isLoading: false,
       })
     } catch (error) {
@@ -129,6 +134,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       set({
         sessionId: id,
         session,
+        activeView: session.phase === '2' ? 'phase2' : 'phase1',
         isLoading: false,
       })
     } catch (error) {
@@ -136,6 +142,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       set({
         sessionId: null,
         session: null,
+        activeView: 'home',
         isLoading: false,
         error: error instanceof Error ? error.message : 'Failed to load session.',
       })
@@ -150,7 +157,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const session = await api.selectTopic(sessionId, nodeId)
-      set({ session, isLoading: false })
+      set({ session, activeView: 'phase1', isLoading: false })
     } catch (error) {
       set({
         isLoading: false,
@@ -166,7 +173,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const session = await api.expandPhase1Topic(sessionId, nodeId)
-      set({ session, isLoading: false })
+      set({ session, activeView: 'phase1', isLoading: false })
     } catch (error) {
       set({
         isLoading: false,
@@ -182,7 +189,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const session = await api.back(sessionId)
-      set({ session, isLoading: false })
+      set({ session, activeView: 'phase1', isLoading: false })
     } catch (error) {
       set({
         isLoading: false,
@@ -198,7 +205,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const response = await api.deepDive(sessionId, nodeId)
-      set({ session: response.session, isLoading: false })
+      set({ session: response.session, activeView: 'phase2', isLoading: false })
     } catch (error) {
       set({
         isLoading: false,
@@ -260,6 +267,31 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       current.delete(nodeId)
       set({ streamingNodeIds: current })
     }
+  },
+
+  showPhase1() {
+    set({
+      activeView: 'phase1',
+      selectedPhase2NodeId: null,
+      chatOpenNodeId: null,
+      error: null,
+    })
+  },
+
+  returnHome() {
+    localStorage.removeItem(SESSION_STORAGE_KEY)
+    set({
+      sessionId: null,
+      session: null,
+      activeView: 'home',
+      isLoading: false,
+      streamingNodeIds: new Set<string>(),
+      explainingNodeIds: new Set<string>(),
+      deletingNodeIds: new Set<string>(),
+      chatOpenNodeId: null,
+      selectedPhase2NodeId: null,
+      error: null,
+    })
   },
 
   async explainNode(nodeId) {
@@ -413,6 +445,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({
       sessionId: null,
       session: null,
+      activeView: 'home',
       isLoading: false,
       streamingNodeIds: new Set<string>(),
       explainingNodeIds: new Set<string>(),

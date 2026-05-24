@@ -54,11 +54,13 @@ describe('useSessionStore', () => {
 
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBe('session-1')
     expect(getState().sessionId).toBe('session-1')
+    expect(getState().activeView).toBe('phase1')
 
     mockedApi.getSession.mockRejectedValueOnce(new Error('missing'))
     await expect(getState().loadSession('missing')).rejects.toThrow('missing')
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
     expect(getState().session).toBeNull()
+    expect(getState().activeView).toBe('home')
   })
 
   it('runs phase 1 navigation and expansion mutations through the API', async () => {
@@ -102,6 +104,27 @@ describe('useSessionStore', () => {
     expect(mockedApi.deepDive).toHaveBeenCalledWith('session-1', 'goal')
     expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/goal/expand', {})
     expect(getState().streamingNodeIds.size).toBe(0)
+    expect(getState().activeView).toBe('phase2')
+  })
+
+  it('switches from phase 2 back to phase 1 locally and can return home without clearing cache', async () => {
+    useSessionStore.setState({
+      sessionId: 'session-1',
+      session: makePhase2Session(),
+      activeView: 'phase2',
+    })
+    localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
+
+    getState().showPhase1()
+    expect(getState().activeView).toBe('phase1')
+    expect(getState().session?.phase).toBe('2')
+
+    getState().returnHome()
+    expect(mockedApi.clearSessions).not.toHaveBeenCalled()
+    expect(mockedClearBrowserData).not.toHaveBeenCalled()
+    expect(getState().activeView).toBe('home')
+    expect(getState().session).toBeNull()
+    expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
   })
 
   it('applies streamed phase 2 node updates, child additions, and edges', async () => {

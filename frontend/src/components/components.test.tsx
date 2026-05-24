@@ -113,7 +113,11 @@ const mockedStreamSSE = vi.mocked(streamSSE)
 const mockedClearBrowserData = vi.mocked(browserData.clearBrowserData)
 
 function setStoreSession(session: Session, sessionId = 'session-1') {
-  useSessionStore.setState({ sessionId, session })
+  useSessionStore.setState({
+    sessionId,
+    session,
+    activeView: session.phase === '2' ? 'phase2' : 'phase1',
+  })
 }
 
 function nodeProps(id: string) {
@@ -223,6 +227,22 @@ describe('frontend components', () => {
     expect(mockedApi.expandPhase1Topic).toHaveBeenCalledWith('session-1', 'child-b')
   })
 
+  it('Phase1View back button returns to the home screen without clearing cache', async () => {
+    const user = userEvent.setup()
+    setStoreSession(makeSession())
+    localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
+
+    render(<Phase1View />)
+
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+
+    expect(mockedApi.clearSessions).not.toHaveBeenCalled()
+    expect(mockedClearBrowserData).not.toHaveBeenCalled()
+    expect(useSessionStore.getState().activeView).toBe('home')
+    expect(useSessionStore.getState().session).toBeNull()
+    expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
+  })
+
   it('DeepDiveButton starts the roadmap from the selected node', async () => {
     const user = userEvent.setup()
     setStoreSession(makeSession())
@@ -326,7 +346,7 @@ describe('frontend components', () => {
     expect(mockedStreamSSE).not.toHaveBeenCalled()
   })
 
-  it('GraphCanvas renders the Phase 2 graph chrome and clear-cache control', async () => {
+  it('GraphCanvas renders the Phase 2 graph chrome, back control, and clear-cache control', async () => {
     const user = userEvent.setup()
     const session = makePhase2Session()
     session.nodes.hidden = makeNode({
@@ -350,6 +370,11 @@ describe('frontend components', () => {
     expect(screen.getByTestId('react-flow')).toHaveAttribute('data-edges', '1')
     expect(screen.getAllByText('Representation Learning').length).toBeGreaterThan(0)
     expect(screen.queryByText('Hidden Fundamental')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back to phase 1' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Back to phase 1' }))
+    expect(useSessionStore.getState().activeView).toBe('phase1')
+    expect(useSessionStore.getState().session).toEqual(session)
 
     await user.click(screen.getByRole('button', { name: 'Clear cache' }))
     await waitFor(() => expect(mockedClearBrowserData).toHaveBeenCalledTimes(1))
