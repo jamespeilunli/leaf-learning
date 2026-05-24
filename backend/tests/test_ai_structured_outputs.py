@@ -15,17 +15,52 @@ async def collect(async_iterable):
 
 
 class FakeResponses:
-    def __init__(self, parsed: object) -> None:
+    def __init__(self, parsed: object, events: list[object] | None = None) -> None:
         self.parsed = parsed
         self.calls: list[dict[str, Any]] = []
+        self.events = events or []
 
     async def parse(self, **kwargs: Any) -> object:
         self.calls.append(kwargs)
         return SimpleNamespace(output_parsed=self.parsed)
 
+    def stream(self, **kwargs: Any) -> object:
+        self.calls.append(kwargs)
+        return FakeStream(self.parsed, self.events)
+
+
+class FakeStream:
+    def __init__(self, parsed: object, events: list[object]) -> None:
+        self.parsed = parsed
+        self.events = events
+
+    async def __aenter__(self) -> "FakeStream":
+        return self
+
+    async def __aexit__(self, exc_type: object, exc: object, exc_tb: object) -> None:
+        return None
+
+    def __aiter__(self) -> "FakeStream":
+        self.index = 0
+        return self
+
+    async def __anext__(self) -> object:
+        if self.index >= len(self.events):
+            raise StopAsyncIteration
+        event = self.events[self.index]
+        self.index += 1
+        return event
+
+    async def get_final_response(self) -> object:
+        return SimpleNamespace(output_parsed=self.parsed)
+
+
+def delta(text: str) -> object:
+    return SimpleNamespace(type="response.output_text.delta", delta=text)
+
 
 class StructuredOutputTests(unittest.TestCase):
-    def test_phase1_generation_uses_responses_parse_text_format(self) -> None:
+    def test_phase1_generation_streams_structured_output_items(self) -> None:
         parsed = ai.Phase1ChildrenResponse(
             nodes=[
                 ai.Phase1Child(
@@ -36,7 +71,15 @@ class StructuredOutputTests(unittest.TestCase):
                 for index in range(4)
             ]
         )
-        responses = FakeResponses(parsed)
+        first_node = parsed.nodes[0].model_dump_json()
+        remaining_nodes = ",".join(item.model_dump_json() for item in parsed.nodes[1:])
+        responses = FakeResponses(
+            parsed,
+            [
+                delta(f'{{"nodes":[{first_node}'),
+                delta(f',{remaining_nodes}]}}'),
+            ],
+        )
         client = SimpleNamespace(responses=responses)
 
         with (
@@ -49,9 +92,10 @@ class StructuredOutputTests(unittest.TestCase):
         self.assertEqual(responses.calls[0]["text_format"], ai.Phase1ChildrenResponse)
         self.assertNotIn("tools", responses.calls[0])
         self.assertEqual([event["event"] for event in events].count("node_added"), 4)
+        self.assertEqual(events[0]["data"]["label"], "Topic 0")
         self.assertEqual(events[-1]["event"], "stream_done")
 
-    def test_phase2_expansion_uses_responses_parse_with_web_search(self) -> None:
+    def test_phase2_expansion_streams_prerequisite_nodes_with_web_search(self) -> None:
         parsed = ai.Phase2ExpansionResponse(
             sources=[
                 Resource(
@@ -70,7 +114,18 @@ class StructuredOutputTests(unittest.TestCase):
                 ai.Phase2Prerequisite(label="Optimization", hint="It explains how parameters are fitted."),
             ],
         )
-        responses = FakeResponses(parsed)
+        first_source = parsed.sources[0].model_dump_json()
+        second_source = parsed.sources[1].model_dump_json()
+        first_prereq = parsed.prerequisites[0].model_dump_json()
+        second_prereq = parsed.prerequisites[1].model_dump_json()
+        responses = FakeResponses(
+            parsed,
+            [
+                delta(f'{{"sources":[{first_source}'),
+                delta(f',{second_source}],"prerequisites":[{first_prereq}'),
+                delta(f',{second_prereq}]}}'),
+            ],
+        )
         client = SimpleNamespace(responses=responses)
 
         with (
@@ -82,11 +137,19 @@ class StructuredOutputTests(unittest.TestCase):
 
         self.assertEqual(responses.calls[0]["text_format"], ai.Phase2ExpansionResponse)
         self.assertEqual(responses.calls[0]["tools"], [{"type": "web_search_preview"}])
-        node_update = next(event for event in events if event["event"] == "node_updated")
-        self.assertEqual(len(node_update["data"]["sources"]), 2)
+        node_updates = [event for event in events if event["event"] == "node_updated"]
+        self.assertEqual(len(node_updates[0]["data"]["sources"]), 1)
+        self.assertEqual(len(node_updates[-1]["data"]["sources"]), 2)
         self.assertEqual([event["event"] for event in events].count("node_added"), 2)
         self.assertEqual([event["event"] for event in events].count("edge_added"), 2)
+        first_node_index = [event["event"] for event in events].index("node_added")
+        self.assertLess(first_node_index, len(events) - 1)
         self.assertEqual(events[-1]["event"], "stream_done")
+
+    def test_completed_json_array_items_ignores_braces_inside_strings(self) -> None:
+        text = '{"nodes":[{"label":"A {nested} topic","description":"Has ] text","why_interesting":"ok"}'
+
+        self.assertEqual(ai._completed_json_array_items(text, "nodes"), [text.removeprefix('{"nodes":[')])
 
     def test_suggest_prerequisite_uses_responses_parse_text_format(self) -> None:
         parsed = ai.SuggestedPrerequisiteResponse(

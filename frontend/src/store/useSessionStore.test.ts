@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { waitFor } from '@testing-library/react'
 
 import * as api from '../lib/api'
 import { streamSSE } from '../hooks/useSSE'
@@ -149,6 +150,52 @@ describe('useSessionStore', () => {
     expect(updated.nodes.goal.sources[0].title).toBe('Advanced Resource')
     expect(updated.nodes.goal.child_ids).toContain('vector')
     expect(updated.edges).toContainEqual(edge)
+  })
+
+  it('shows streamed child nodes before expansion completes', async () => {
+    const session = makePhase2Session({
+      nodes: {
+        goal: makeNode({
+          id: 'goal',
+          label: 'Representation Learning',
+          phase: '2',
+          node_state: 'grayed',
+          child_ids: [],
+        }),
+      },
+      edges: [],
+    })
+    const child = makeNode({
+      id: 'vector',
+      label: 'Vector Spaces',
+      phase: '2',
+      node_state: 'grayed',
+      parent_id: 'goal',
+    })
+    let finishStream!: () => void
+    const streamCanFinish = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+    useSessionStore.setState({ sessionId: 'session-1', session })
+    mockedStreamSSE.mockImplementation(async function* () {
+      yield { event: 'node_added', data: child }
+      await streamCanFinish
+      yield { event: 'stream_done', data: {} }
+    })
+
+    const expand = getState().expandNode('goal')
+    await waitFor(() => {
+      expect((getState().session as Session).nodes.vector).toEqual(child)
+    })
+
+    const duringStream = getState().session as Session
+    expect(duringStream.nodes.goal.child_ids).toContain('vector')
+    expect(getState().streamingNodeIds.has('goal')).toBe(true)
+
+    finishStream()
+    await expand
+
+    expect(getState().streamingNodeIds.has('goal')).toBe(false)
   })
 
   it('explains grayed nodes, marks learned duplicates, and prunes subtrees', async () => {

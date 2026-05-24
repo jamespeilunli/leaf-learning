@@ -42,6 +42,94 @@ class SuggestedPrerequisiteResponse(BaseModel):
     description: str
 
 
+class _JsonArrayItemStream:
+    def __init__(self, field_name: str, item_type: type[ParsedResponseT]) -> None:
+        self.field_name = field_name
+        self.item_type = item_type
+        self.text = ""
+        self.emitted_count = 0
+        self.items: list[ParsedResponseT] = []
+
+    def append(self, delta: str) -> list[ParsedResponseT]:
+        self.text += delta
+        return self.ready_items()
+
+    def ready_items(self) -> list[ParsedResponseT]:
+        raw_items = _completed_json_array_items(self.text, self.field_name)
+        new_items = raw_items[self.emitted_count :]
+        parsed: list[ParsedResponseT] = []
+        for raw in new_items:
+            parsed.append(self.item_type.model_validate_json(raw))
+        self.emitted_count += len(parsed)
+        self.items.extend(parsed)
+        return parsed
+
+
+def _completed_json_array_items(text: str, field_name: str) -> list[str]:
+    key = f'"{field_name}"'
+    key_index = text.find(key)
+    if key_index < 0:
+        return []
+
+    colon_index = text.find(":", key_index + len(key))
+    if colon_index < 0:
+        return []
+
+    array_start = text.find("[", colon_index + 1)
+    if array_start < 0:
+        return []
+
+    items: list[str] = []
+    object_start: int | None = None
+    depth = 0
+    in_string = False
+    escaping = False
+
+    for index in range(array_start + 1, len(text)):
+        char = text[index]
+
+        if in_string:
+            if escaping:
+                escaping = False
+            elif char == "\\":
+                escaping = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            continue
+
+        if char == "]" and depth == 0:
+            break
+
+        if char == "{":
+            if depth == 0:
+                object_start = index
+            depth += 1
+            continue
+
+        if char == "[" and depth > 0:
+            depth += 1
+            continue
+
+        if char in "}]":
+            if depth > 0:
+                depth -= 1
+            if depth == 0 and object_start is not None:
+                items.append(text[object_start : index + 1])
+                object_start = None
+
+    return items
+
+
+def _stream_text_delta(event: object) -> str:
+    if getattr(event, "type", None) != "response.output_text.delta":
+        return ""
+    return getattr(event, "delta", "") or ""
+
+
 def _env_flag(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -112,23 +200,38 @@ Each why_interesting value must be exactly 1 sentence on why someone learning wo
 """.strip()
 
     try:
-        response = await get_client().responses.parse(
+        node_stream = _JsonArrayItemStream("nodes", Phase1Child)
+        async with get_client().responses.stream(
             model=MODEL,
             instructions=instructions,
             input=f"Generate subtopics for {current_label}.",
             text_format=Phase1ChildrenResponse,
-        )
-        payload = _require_output_parsed(response, Phase1ChildrenResponse)
+        ) as stream:
+            async for event in stream:
+                delta = _stream_text_delta(event)
+                if not delta:
+                    continue
+                for item in node_stream.append(delta):
+                    node = GraphNode(
+                        label=item.label,
+                        description=item.description,
+                        why_interesting=item.why_interesting,
+                        phase="1",
+                        node_state="expanded",
+                    )
+                    yield {"event": "node_added", "data": node.model_dump(by_alias=True)}
 
-        for item in payload.nodes:
-            node = GraphNode(
-                label=item.label,
-                description=item.description,
-                why_interesting=item.why_interesting,
-                phase="1",
-                node_state="expanded",
-            )
-            yield {"event": "node_added", "data": node.model_dump(by_alias=True)}
+            response = await stream.get_final_response()
+            payload = _require_output_parsed(response, Phase1ChildrenResponse)
+            for item in payload.nodes[node_stream.emitted_count :]:
+                node = GraphNode(
+                    label=item.label,
+                    description=item.description,
+                    why_interesting=item.why_interesting,
+                    phase="1",
+                    node_state="expanded",
+                )
+                yield {"event": "node_added", "data": node.model_dump(by_alias=True)}
 
         yield {"event": "stream_done", "data": {}}
     except Exception as exc:
@@ -162,32 +265,61 @@ Do NOT include any of these topics as prerequisites, the user already knows them
 """.strip()
 
     try:
-        response = await get_client().responses.parse(
+        source_stream = _JsonArrayItemStream("sources", Resource)
+        prerequisite_stream = _JsonArrayItemStream("prerequisites", Phase2Prerequisite)
+        async with get_client().responses.stream(
             model=MODEL,
             instructions=instructions,
             input=f"Expand the learning node for {node_label}.",
             tools=[{"type": "web_search_preview"}],
             text_format=Phase2ExpansionResponse,
-        )
-        payload = _require_output_parsed(response, Phase2ExpansionResponse)
+        ) as stream:
+            async for event in stream:
+                delta = _stream_text_delta(event)
+                if not delta:
+                    continue
 
-        yield {
-            "event": "node_updated",
-            "data": {
-                "sources": [source.model_dump() for source in payload.sources],
-            },
-        }
+                sources = source_stream.append(delta)
+                if sources:
+                    yield {
+                        "event": "node_updated",
+                        "data": {
+                            "sources": [source.model_dump() for source in source_stream.items],
+                        },
+                    }
 
-        for item in payload.prerequisites:
-            node = GraphNode(
-                label=item.label,
-                description=item.hint,
-                phase="2",
-                node_state="grayed",
-            )
-            yield {"event": "node_added", "data": node.model_dump(by_alias=True)}
-            edge = GraphEdge(from_id=node_label, to_id=node.id, label="requires")
-            yield {"event": "edge_added", "data": edge.model_dump(by_alias=True)}
+                for item in prerequisite_stream.append(delta):
+                    node = GraphNode(
+                        label=item.label,
+                        description=item.hint,
+                        phase="2",
+                        node_state="grayed",
+                    )
+                    yield {"event": "node_added", "data": node.model_dump(by_alias=True)}
+                    edge = GraphEdge(from_id=node_label, to_id=node.id, label="requires")
+                    yield {"event": "edge_added", "data": edge.model_dump(by_alias=True)}
+
+            response = await stream.get_final_response()
+            payload = _require_output_parsed(response, Phase2ExpansionResponse)
+
+            if source_stream.emitted_count < len(payload.sources):
+                yield {
+                    "event": "node_updated",
+                    "data": {
+                        "sources": [source.model_dump() for source in payload.sources],
+                    },
+                }
+
+            for item in payload.prerequisites[prerequisite_stream.emitted_count :]:
+                node = GraphNode(
+                    label=item.label,
+                    description=item.hint,
+                    phase="2",
+                    node_state="grayed",
+                )
+                yield {"event": "node_added", "data": node.model_dump(by_alias=True)}
+                edge = GraphEdge(from_id=node_label, to_id=node.id, label="requires")
+                yield {"event": "edge_added", "data": edge.model_dump(by_alias=True)}
 
         yield {"event": "stream_done", "data": {}}
     except Exception as exc:
