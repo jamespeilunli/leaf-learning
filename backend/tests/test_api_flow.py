@@ -5,7 +5,8 @@ from collections.abc import AsyncIterator
 from unittest.mock import patch
 
 from app.ai import using_mock_ai
-from app.models import GraphEdge, GraphNode
+from app.models import GraphEdge, GraphNode, Resource
+from app.phase2_prefetch import PHASE2_ABSOLUTE_MAX_DEPTH
 from app.storage import load_session, save_session
 
 from tests.helpers import isolated_sessions_dir, parse_sse, test_client
@@ -299,6 +300,86 @@ class ApiFlowTests(unittest.TestCase):
         self.assertIn("node_added", [name for name, _ in events])
         expanded = self.client.get(f"/api/session/{session_id}").json()
         self.assertGreater(max(node["depth"] for node in expanded["nodes"].values() if node["phase"] == "2"), 2)
+
+    def test_depth_six_expand_generates_resource_without_children(self) -> None:
+        session_id, session = self.create_machine_learning_session()
+        root_id = session["current_phase1_node_id"]
+        child_id = session["nodes"][root_id]["child_ids"][0]
+        self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id})
+
+        stored = load_session(session_id)
+        focus = stored.nodes[child_id]
+        leaf = GraphNode(
+            label="Depth Six Leaf",
+            description="A max-depth prerequisite.",
+            phase="2",
+            node_state="grayed",
+            parent_id=focus.id,
+            depth=PHASE2_ABSOLUTE_MAX_DEPTH,
+            is_visible=True,
+        )
+        stored.nodes[leaf.id] = leaf
+        focus.child_ids.append(leaf.id)
+        stored.edges.append(GraphEdge(from_id=focus.id, to_id=leaf.id, label="requires"))
+        save_session(stored)
+
+        resource = Resource(
+            url="https://example.com/depth-six",
+            title="Depth Six Resource",
+            description="A resource for the max-depth leaf.",
+        )
+
+        async def fake_expand_phase2_node(*args, **kwargs) -> AsyncIterator[dict]:
+            blocked_child = GraphNode(label="Depth Seven Child", description="Should not be added.", phase="2")
+            yield {"event": "node_updated", "data": {"resource": resource.model_dump()}}
+            yield {"event": "node_added", "data": blocked_child.model_dump(by_alias=True)}
+            yield {
+                "event": "edge_added",
+                "data": GraphEdge(from_id=leaf.id, to_id=blocked_child.id, label="requires").model_dump(by_alias=True),
+            }
+            yield {"event": "stream_done", "data": {}}
+
+        async def noop_prefetch(*args, **kwargs) -> None:
+            return None
+
+        with (
+            patch("app.routers.graph.expand_phase2_node", side_effect=fake_expand_phase2_node),
+            patch("app.routers.graph._prefetch_descendants", side_effect=noop_prefetch),
+        ):
+            expand_response = self.client.post(f"/api/session/{session_id}/node/{leaf.id}/expand")
+
+        events = parse_sse(expand_response.text)
+        self.assertEqual(expand_response.status_code, 200)
+        self.assertIn("node_updated", [name for name, _ in events])
+        self.assertNotIn("node_added", [name for name, _ in events])
+        expanded = self.client.get(f"/api/session/{session_id}").json()
+        self.assertEqual(expanded["nodes"][leaf.id]["resource"]["url"], resource.url)
+        self.assertEqual(expanded["nodes"][leaf.id]["child_ids"], [])
+        self.assertLessEqual(max(node["depth"] for node in expanded["nodes"].values()), PHASE2_ABSOLUTE_MAX_DEPTH)
+
+    def test_suggest_prerequisite_rejects_depth_six_parent(self) -> None:
+        session_id, session = self.create_machine_learning_session()
+        root_id = session["current_phase1_node_id"]
+        child_id = session["nodes"][root_id]["child_ids"][0]
+        self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id})
+
+        stored = load_session(session_id)
+        leaf = GraphNode(
+            label="Depth Six Leaf",
+            phase="2",
+            node_state="expanded",
+            depth=PHASE2_ABSOLUTE_MAX_DEPTH,
+        )
+        stored.nodes[leaf.id] = leaf
+        save_session(stored)
+
+        response = self.client.post(
+            f"/api/session/{session_id}/node/{leaf.id}/suggest-prerequisite",
+            json={"message": "I am missing one more concept."},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "Maximum Phase 2 depth reached.")
 
     def test_phase2_expand_explain_learned_dedupe_and_prune(self) -> None:
         session_id, session = self.create_machine_learning_session()

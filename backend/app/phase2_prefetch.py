@@ -12,6 +12,7 @@ from app.models import GraphEdge, GraphNode, Resource, Session
 PHASE2_INITIAL_PREFETCH_LAYERS = 2
 PHASE2_INCREMENTAL_PREFETCH_LAYERS = 1
 PHASE2_MAX_DEPTH_FROM_FOCUS = PHASE2_INITIAL_PREFETCH_LAYERS
+PHASE2_ABSOLUTE_MAX_DEPTH = 6
 PHASE2_MAX_DEPTH_ENV = "ALPHAG3N_PHASE2_MAX_DEPTH"
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,10 @@ def phase2_max_depth(session: Session) -> int:
     if not session.focus_node_id or session.focus_node_id not in session.nodes:
         return phase2_max_depth_from_focus()
     return session.nodes[session.focus_node_id].depth + phase2_max_depth_from_focus()
+
+
+def can_add_phase2_children(node: GraphNode) -> bool:
+    return node.depth < PHASE2_ABSOLUTE_MAX_DEPTH
 
 
 def _ancestor_labels(session: Session, node: GraphNode) -> set[str]:
@@ -130,7 +135,7 @@ async def prefetch_phase2_tree(
 ) -> None:
     """Generate hidden Phase 2 descendants breadth-first within a start-relative layer budget."""
     layer_budget = phase2_max_depth_from_focus() if max_layers_from_start is None else max_layers_from_start
-    max_depth = start_node.depth + max(0, layer_budget)
+    max_depth = min(PHASE2_ABSOLUTE_MAX_DEPTH, start_node.depth + max(0, layer_budget))
     queue: deque[str] = deque([start_node.id])
     visited: set[str] = set()
 
@@ -141,21 +146,26 @@ async def prefetch_phase2_tree(
         visited.add(node_id)
 
         node = session.nodes.get(node_id)
-        if not node or node.phase != "2" or node.depth >= max_depth:
+        if not node or node.phase != "2" or node.depth > max_depth:
             continue
 
         if not node.child_ids:
-            await generate_direct_phase2_children(session, node, goal_label)
+            await generate_direct_phase2_children(session, node, goal_label, max_child_depth=max_depth)
             if on_progress:
                 on_progress(session)
 
         for child_id in node.child_ids:
             child = session.nodes.get(child_id)
-            if child and child.depth < max_depth:
+            if child and child.depth <= max_depth:
                 queue.append(child_id)
 
 
-async def generate_direct_phase2_children(session: Session, node: GraphNode, goal_label: str) -> None:
+async def generate_direct_phase2_children(
+    session: Session,
+    node: GraphNode,
+    goal_label: str,
+    max_child_depth: int = PHASE2_ABSOLUTE_MAX_DEPTH,
+) -> None:
     blocked_labels = _ancestor_labels(session, node) | _existing_child_labels(session, node)
     known_topics = sorted(set(session.known_topics) | blocked_labels)
 
@@ -190,6 +200,8 @@ async def generate_direct_phase2_children(session: Session, node: GraphNode, goa
 
         child.parent_id = node.id
         child.depth = node.depth + 1
+        if child.depth > max_child_depth:
+            continue
         child.phase = "2"
         child.node_state = "grayed"
         child.is_visible = False
@@ -215,13 +227,13 @@ async def prefetch_child_layers(
     goal_label: str,
     on_progress: Callable[[Session], None] | None = None,
 ) -> None:
-    max_depth = node.depth + PHASE2_INCREMENTAL_PREFETCH_LAYERS
+    max_depth = min(PHASE2_ABSOLUTE_MAX_DEPTH, node.depth + PHASE2_INCREMENTAL_PREFETCH_LAYERS)
 
     for child_id in node.child_ids:
         child = session.nodes.get(child_id)
-        if not child or child.phase != "2" or child.depth >= max_depth or child.child_ids:
+        if not child or child.phase != "2" or child.depth > max_depth or child.child_ids:
             continue
-        await generate_direct_phase2_children(session, child, goal_label)
+        await generate_direct_phase2_children(session, child, goal_label, max_child_depth=max_depth)
         if on_progress:
             on_progress(session)
 

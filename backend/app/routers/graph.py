@@ -14,6 +14,7 @@ from app.models import GraphEdge, GraphNode, Resource, Session
 from app.phase2_prefetch import (
     PHASE2_INCREMENTAL_PREFETCH_LAYERS,
     adopt_prefetched_children_by_label,
+    can_add_phase2_children,
     prefetch_phase2_tree,
     reveal_direct_phase2_children,
 )
@@ -101,11 +102,13 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
         session = merge_save_session(session)
         node = _get_node(session, node_id)
 
-        if not node.child_ids and adopt_prefetched_children_by_label(session, node):
+        children_allowed = can_add_phase2_children(node)
+
+        if children_allowed and not node.child_ids and adopt_prefetched_children_by_label(session, node):
             session = merge_save_session(session)
             node = _get_node(session, node_id)
 
-        if node.child_ids:
+        if children_allowed and node.child_ids:
             revealed_nodes, revealed_edges = reveal_direct_phase2_children(session, node)
             merge_save_session(session)
             asyncio.create_task(
@@ -116,6 +119,11 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
                 yield _sse("node_added", child.model_dump(by_alias=True))
             for edge in revealed_edges:
                 yield _sse("edge_added", edge.model_dump(by_alias=True))
+            yield _sse("stream_done", {})
+            return
+
+        if not children_allowed and (node.resource or node.sources):
+            yield _sse("node_updated", node.model_dump(by_alias=True))
             yield _sse("stream_done", {})
             return
 
@@ -136,6 +144,8 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
                 continue
 
             if event_name == "node_added":
+                if not can_add_phase2_children(node):
+                    continue
                 child = GraphNode.model_validate(data)
                 child.parent_id = node.id
                 child.depth = node.depth + 1
@@ -160,6 +170,8 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
                 continue
 
             if event_name == "edge_added":
+                if not can_add_phase2_children(node):
+                    continue
                 edge = GraphEdge.model_validate(data)
                 edge.from_id = node.id
                 session.edges.append(edge)
@@ -187,6 +199,8 @@ async def suggest_node_prerequisite(
     parent = _get_node(session, node_id)
     if parent.node_state not in {"expanded", "learned"}:
         raise HTTPException(status_code=400, detail="Missing prerequisites can only be added to active nodes.")
+    if not can_add_phase2_children(parent):
+        raise HTTPException(status_code=400, detail="Maximum Phase 2 depth reached.")
 
     suggestion = await suggest_prerequisite(
         payload.message,
