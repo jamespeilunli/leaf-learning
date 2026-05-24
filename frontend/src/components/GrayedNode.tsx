@@ -4,15 +4,24 @@ import type { NodeProps } from 'reactflow'
 
 import { useSessionStore } from '../store/useSessionStore'
 import type { GraphNode } from '../types'
+import { cn } from '../lib/cn'
+import type { RoadmapNodeMotion } from './phase2NodeMotion'
 
-export function GrayedNode({ data }: NodeProps<{ node: GraphNode }>) {
+type GrayedNodeData = {
+  node: GraphNode
+  motion?: RoadmapNodeMotion
+  motionKey?: string
+}
+
+export function GrayedNode({ data }: NodeProps<GrayedNodeData>) {
   const { node } = data
+  const motion = data.motion ?? 'idle'
   const expandNode = useSessionStore((state) => state.expandNode)
   const deleteNode = useSessionStore((state) => state.deleteNode)
   const streamingNodeIds = useSessionStore((state) => state.streamingNodeIds)
   const isExpanding = streamingNodeIds.has(node.id)
   const isKnownElsewhere = node.explain_more_text === '__known__'
-  const isDisabled = isKnownElsewhere || isExpanding
+  const isDisabled = isKnownElsewhere || isExpanding || motion === 'exit'
 
   const activateNode = () => {
     if (!isDisabled) {
@@ -24,7 +33,14 @@ export function GrayedNode({ data }: NodeProps<{ node: GraphNode }>) {
     <div
       aria-label={`Activate ${node.label}`}
       aria-disabled={isDisabled}
-      className="group relative h-[132px] w-[236px] cursor-pointer rounded-[var(--radius-sm)] border border-dashed border-[var(--line-strong)] bg-white/62 p-3 text-left opacity-85 shadow-[0_10px_22px_rgba(15,23,42,0.10)] backdrop-blur transition hover:border-[var(--accent)] hover:bg-white/76 hover:opacity-100 hover:shadow-[0_16px_34px_rgba(15,23,42,0.16)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 aria-disabled:cursor-default"
+      className={cn(
+        'group relative h-[132px] w-[236px] cursor-pointer rounded-[var(--radius-sm)] border border-dashed border-[var(--line-strong)] bg-white/62 p-3 text-left opacity-85 shadow-[0_10px_22px_rgba(15,23,42,0.10)] backdrop-blur transition hover:border-[var(--accent)] hover:bg-white/76 hover:opacity-100 hover:shadow-[0_16px_34px_rgba(15,23,42,0.16)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 aria-disabled:cursor-default',
+        'roadmap-node',
+        motion === 'inactiveEnter' && 'roadmap-node--inactive-enter',
+        motion === 'exit' && 'roadmap-node--exit pointer-events-none',
+      )}
+      data-motion={motion}
+      data-motion-key={data.motionKey}
       role="button"
       tabIndex={isDisabled ? -1 : 0}
       onKeyDown={(event) => {

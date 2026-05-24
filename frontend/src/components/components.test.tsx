@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { forwardRef, useImperativeHandle } from 'react'
 import type { ComponentType, ReactNode } from 'react'
@@ -29,10 +29,15 @@ vi.mock('reactflow', () => ({
   }: {
     children: ReactNode
     nodes: Array<{ id: string; type?: string; data: unknown }>
-    edges: unknown[]
+    edges: Array<{ className?: string }>
     nodeTypes?: Record<string, ComponentType<Record<string, unknown>>>
   }) => (
-    <div data-edges={edges.length} data-nodes={nodes.length} data-testid="react-flow">
+    <div
+      data-edge-classes={edges.map((edge) => edge.className ?? '').join(' ')}
+      data-edges={edges.length}
+      data-nodes={nodes.length}
+      data-testid="react-flow"
+    >
       {nodes.map((node) => {
         const NodeComponent = node.type ? nodeTypes[node.type] : null
         return NodeComponent ? (
@@ -298,6 +303,23 @@ describe('frontend components', () => {
     expect(useSessionStore.getState().selectedPhase2NodeId).toBe('goal')
   })
 
+  it('Phase2Node exposes learned transition motion', () => {
+    const session = makePhase2Session()
+    const learnedNode = { ...session.nodes.goal, node_state: 'learned' as const }
+    setStoreSession({ ...session, nodes: { ...session.nodes, goal: learnedNode } })
+
+    render(
+      <Phase2Node
+        data={{ node: learnedNode, motion: 'learned', motionKey: 'goal-learned' }}
+        {...nodeProps('goal')}
+      />,
+    )
+
+    const nodeButton = screen.getByRole('button', { name: /Representation Learning/i })
+    expect(nodeButton).toHaveAttribute('data-motion', 'learned')
+    expect(nodeButton).toHaveClass('roadmap-node--learned')
+  })
+
   it('GrayedNode activates, removes, and labels known duplicates', async () => {
     const user = userEvent.setup()
     const session = makePhase2Session()
@@ -346,6 +368,22 @@ describe('frontend components', () => {
     expect(mockedStreamSSE).not.toHaveBeenCalled()
   })
 
+  it('GrayedNode exposes inactive enter motion', () => {
+    const session = makePhase2Session()
+    setStoreSession(session)
+
+    render(
+      <GrayedNode
+        data={{ node: session.nodes.prereq, motion: 'inactiveEnter', motionKey: 'prereq-inactive' }}
+        {...nodeProps('prereq')}
+      />,
+    )
+
+    const node = screen.getByRole('button', { name: 'Activate Vector Spaces' })
+    expect(node).toHaveAttribute('data-motion', 'inactiveEnter')
+    expect(node).toHaveClass('roadmap-node--inactive-enter')
+  })
+
   it('GraphCanvas renders the Phase 2 graph chrome, back control, and clear-cache control', async () => {
     const user = userEvent.setup()
     const session = makePhase2Session()
@@ -380,6 +418,95 @@ describe('frontend components', () => {
     await waitFor(() => expect(mockedClearBrowserData).toHaveBeenCalledTimes(1))
     expect(useSessionStore.getState().session).toBeNull()
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
+  })
+
+  it('GraphCanvas marks newly added active nodes with enter motion', async () => {
+    const session = makePhase2Session()
+    setStoreSession(session)
+
+    render(<GraphCanvas />)
+
+    await waitFor(() => expect(screen.getByTestId('react-flow')).toHaveAttribute('data-nodes', '3'))
+
+    const newNode = makeNode({
+      id: 'attention',
+      label: 'Attention Mechanisms',
+      description: 'How models select relevant context.',
+      phase: '2',
+      node_state: 'expanded',
+      parent_id: 'goal',
+      depth: 1,
+    })
+
+    act(() => {
+      useSessionStore.setState({
+        session: {
+          ...session,
+          nodes: {
+            ...session.nodes,
+            goal: {
+              ...session.nodes.goal,
+              child_ids: [...session.nodes.goal.child_ids, newNode.id],
+            },
+            [newNode.id]: newNode,
+          },
+          edges: [
+            ...session.edges,
+            { id: 'edge-attention', from: 'goal', to: newNode.id, label: 'requires' },
+          ],
+        },
+      })
+    })
+
+    const addedNode = await screen.findByRole('button', { name: /Attention Mechanisms/i })
+    await waitFor(() => expect(addedNode).toHaveAttribute('data-motion', 'enter'))
+    expect(addedNode).toHaveClass('roadmap-node--enter')
+  })
+
+  it('GraphCanvas marks newly added grayed nodes and connected edges with reveal motion', async () => {
+    const session = makePhase2Session()
+    setStoreSession(session)
+
+    render(<GraphCanvas />)
+
+    await waitFor(() => expect(screen.getByTestId('react-flow')).toHaveAttribute('data-nodes', '3'))
+
+    const newNode = makeNode({
+      id: 'fourier',
+      label: 'Fourier Transforms',
+      description: 'Frequency-domain foundations.',
+      phase: '2',
+      node_state: 'grayed',
+      parent_id: 'goal',
+      depth: 1,
+    })
+
+    act(() => {
+      useSessionStore.setState({
+        session: {
+          ...session,
+          nodes: {
+            ...session.nodes,
+            goal: {
+              ...session.nodes.goal,
+              child_ids: [...session.nodes.goal.child_ids, newNode.id],
+            },
+            [newNode.id]: newNode,
+          },
+          edges: [
+            ...session.edges,
+            { id: 'edge-fourier', from: 'goal', to: newNode.id, label: 'requires' },
+          ],
+        },
+      })
+    })
+
+    const addedNode = await screen.findByRole('button', { name: 'Activate Fourier Transforms' })
+    await waitFor(() => expect(addedNode).toHaveAttribute('data-motion', 'inactiveEnter'))
+    expect(addedNode).toHaveClass('roadmap-node--inactive-enter')
+    expect(screen.getByTestId('react-flow').getAttribute('data-edge-classes')).toContain(
+      'roadmap-edge--enter',
+    )
   })
 
   it('NodeChatPanel streams a scoped answer and reloads persisted history', async () => {
