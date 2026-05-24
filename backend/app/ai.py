@@ -390,19 +390,30 @@ Each why_interesting value must be exactly 1 sentence on why someone learning wo
 
 
 async def expand_phase2_node(
-    node_label: str, known_topics: list[str], goal_label: str
+    node_label: str,
+    known_topics: list[str],
+    goal_label: str,
+    context_path: list[str] | None = None,
 ) -> AsyncGenerator[dict, None]:
+    if not context_path:
+        context_path = [goal_label] if goal_label == node_label else [goal_label, node_label]
+    context_path_text = " → ".join(context_path)
+
     if using_mock_ai():
         async for event in mock_ai.expand_phase2_node(
             node_label,
             known_topics,
             goal_label,
+            context_path,
         ):
             yield event
         return
 
     instructions = f"""
 You are a learning roadmap assistant. The user's goal is to understand "{goal_label}".
+The active node being expanded is "{node_label}".
+The path from the Phase 2 root goal to this active node is: {context_path_text}.
+Use every topic in that path as branch context, so the new prerequisites build on the route the user took through the tree instead of treating the active node in isolation.
 Explain topics at a technical level with formal, precise, mechanism-focused detail.
 
 Return prerequisites first so the UI can stream graph nodes immediately.

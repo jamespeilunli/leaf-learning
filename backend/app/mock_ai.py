@@ -276,7 +276,10 @@ def _fixture_sources(fixture: dict[str, object], node_label: str) -> list[Resour
 
 
 async def expand_phase2_node(
-    node_label: str, known_topics: list[str], goal_label: str
+    node_label: str,
+    known_topics: list[str],
+    goal_label: str,
+    context_path: list[str] | None = None,
 ) -> AsyncGenerator[dict, None]:
     fixture = DEEP_DIVE_FIXTURES.get(_key(node_label)) or _generic_deep_dive(node_label)
 

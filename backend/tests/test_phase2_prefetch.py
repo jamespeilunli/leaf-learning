@@ -21,6 +21,7 @@ async def fake_expand_phase2_node(
     node_label: str,
     known_topics: list[str],
     goal_label: str,
+    context_path: list[str] | None = None,
 ) -> AsyncIterator[dict]:
     resource = Resource(
         url=f"https://example.com/{node_label.lower().replace(' ', '-')}",
@@ -85,6 +86,39 @@ class Phase2PrefetchTests(unittest.TestCase):
         child = session.nodes[branch.child_ids[0]]
         self.assertEqual(child.depth, 3)
         self.assertEqual(child.child_ids, [])
+
+    def test_prefetch_passes_root_to_node_context_path(self) -> None:
+        calls: list[tuple[str, list[str] | None]] = []
+        focus = GraphNode(label="Goal", phase="2", node_state="expanded", depth=0)
+        branch = GraphNode(
+            label="Selected Branch",
+            phase="2",
+            node_state="grayed",
+            parent_id=focus.id,
+            depth=1,
+        )
+        focus.child_ids.append(branch.id)
+        session = Session(
+            root_topic="machine learning",
+            phase="2",
+            focus_node_id=focus.id,
+            nodes={focus.id: focus, branch.id: branch},
+        )
+
+        async def recording_expand_phase2_node(
+            node_label: str,
+            known_topics: list[str],
+            goal_label: str,
+            context_path: list[str] | None = None,
+        ) -> AsyncIterator[dict]:
+            calls.append((node_label, context_path))
+            for event in ():
+                yield event
+
+        with patch("app.phase2_prefetch.expand_phase2_node", side_effect=recording_expand_phase2_node):
+            collect(prefetch_phase2_tree(session, branch, focus.label, max_layers_from_start=0))
+
+        self.assertEqual(calls, [("Selected Branch", ["Goal", "Selected Branch"])])
 
     def test_prefetch_stops_at_absolute_depth_limit(self) -> None:
         focus = GraphNode(label="Goal", phase="2", node_state="expanded", depth=0)

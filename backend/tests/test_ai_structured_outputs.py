@@ -144,10 +144,24 @@ class StructuredOutputTests(unittest.TestCase):
             patch("app.ai.endpoint_validation_result", return_value=EndpointValidationResult(True, "HTTP 200")),
             patch("app.ai._extract_response_text", side_effect=AssertionError("old JSON path used")),
         ):
-            events = asyncio.run(collect(ai.expand_phase2_node("Representation Learning", [], "Machine Learning")))
+            events = asyncio.run(
+                collect(
+                    ai.expand_phase2_node(
+                        "Representation Learning",
+                        [],
+                        "Machine Learning",
+                        context_path=["Machine Learning", "Neural Networks", "Representation Learning"],
+                    )
+                )
+            )
 
         self.assertEqual(responses.calls[0]["text_format"], ai.Phase2ExpansionResponse)
         self.assertEqual(responses.calls[0]["tools"], [{"type": "web_search_preview"}])
+        self.assertIn(
+            "Machine Learning → Neural Networks → Representation Learning",
+            responses.calls[0]["instructions"],
+        )
+        self.assertIn('The active node being expanded is "Representation Learning"', responses.calls[0]["instructions"])
         node_updates = [event for event in events if event["event"] == "node_updated"]
         first_node_index = [event["event"] for event in events].index("node_added")
         first_update_index = [event["event"] for event in events].index("node_updated")
