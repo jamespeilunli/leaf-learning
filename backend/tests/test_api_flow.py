@@ -317,6 +317,55 @@ class ApiFlowTests(unittest.TestCase):
         expanded = self.client.get(f"/api/session/{session_id}").json()
         self.assertGreater(max(node["depth"] for node in expanded["nodes"].values() if node["phase"] == "2"), 2)
 
+    def test_phase2_expand_passes_root_to_node_context_path(self) -> None:
+        session_id, session = self.create_machine_learning_session()
+        root_id = session["current_phase1_node_id"]
+        child_id = session["nodes"][root_id]["child_ids"][0]
+        self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id})
+
+        stored = load_session(session_id)
+        focus = stored.nodes[child_id]
+        parent = GraphNode(
+            label="Intermediate Topic",
+            description="Branch context.",
+            phase="2",
+            node_state="expanded",
+            parent_id=focus.id,
+            depth=focus.depth + 1,
+            is_visible=True,
+        )
+        leaf = GraphNode(
+            label="Active Leaf",
+            description="Node the user clicked.",
+            phase="2",
+            node_state="grayed",
+            parent_id=parent.id,
+            depth=parent.depth + 1,
+            is_visible=True,
+        )
+        stored.nodes[parent.id] = parent
+        stored.nodes[leaf.id] = leaf
+        focus.child_ids.append(parent.id)
+        parent.child_ids.append(leaf.id)
+        stored.edges.append(GraphEdge(from_id=focus.id, to_id=parent.id, label="requires"))
+        stored.edges.append(GraphEdge(from_id=parent.id, to_id=leaf.id, label="requires"))
+        save_session(stored)
+
+        calls: list[dict] = []
+
+        async def recording_expand_phase2_node(*args, **kwargs) -> AsyncIterator[dict]:
+            calls.append({"args": args, "kwargs": kwargs})
+            yield {"event": "stream_done", "data": {}}
+
+        with patch("app.routers.graph.expand_phase2_node", side_effect=recording_expand_phase2_node):
+            expand_response = self.client.post(f"/api/session/{session_id}/node/{leaf.id}/expand")
+
+        self.assertEqual(expand_response.status_code, 200)
+        self.assertEqual(
+            calls[0]["kwargs"]["context_path"],
+            [focus.label, "Intermediate Topic", "Active Leaf"],
+        )
+
     def test_depth_six_expand_generates_resource_without_children(self) -> None:
         session_id, session = self.create_machine_learning_session()
         root_id = session["current_phase1_node_id"]

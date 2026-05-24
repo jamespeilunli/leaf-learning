@@ -51,6 +51,29 @@ def _ancestor_labels(session: Session, node: GraphNode) -> set[str]:
     return labels
 
 
+def phase2_context_path(session: Session, node: GraphNode) -> list[str]:
+    labels: list[str] = []
+    seen: set[str] = set()
+    current: GraphNode | None = node
+    while current and current.id not in seen:
+        seen.add(current.id)
+        labels.append(current.label)
+        if current.id == session.focus_node_id:
+            return list(reversed(labels))
+        current = session.nodes.get(current.parent_id) if current.parent_id else None
+
+    focus = session.nodes.get(session.focus_node_id or "")
+    if not focus:
+        return list(reversed(labels)) or [node.label]
+
+    path = [focus.label, *reversed(labels)]
+    deduped: list[str] = []
+    for label in path:
+        if not deduped or normalized_label(deduped[-1]) != normalized_label(label):
+            deduped.append(label)
+    return deduped
+
+
 def _existing_child_labels(session: Session, node: GraphNode) -> set[str]:
     labels: set[str] = set()
     for child_id in node.child_ids:
@@ -168,8 +191,9 @@ async def generate_direct_phase2_children(
 ) -> None:
     blocked_labels = _ancestor_labels(session, node) | _existing_child_labels(session, node)
     known_topics = sorted(set(session.known_topics) | blocked_labels)
+    context_path = phase2_context_path(session, node)
 
-    async for event in expand_phase2_node(node.label, known_topics, goal_label):
+    async for event in expand_phase2_node(node.label, known_topics, goal_label, context_path=context_path):
         event_name = event["event"]
         data = event["data"]
 

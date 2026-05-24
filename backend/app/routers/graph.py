@@ -15,6 +15,8 @@ from app.phase2_prefetch import (
     PHASE2_INCREMENTAL_PREFETCH_LAYERS,
     adopt_prefetched_children_by_label,
     can_add_phase2_children,
+    normalized_label,
+    phase2_context_path,
     prefetch_phase2_tree,
     reveal_direct_phase2_children,
 )
@@ -127,8 +129,22 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
             yield _sse("stream_done", {})
             return
 
+        context_path = phase2_context_path(session, node)
+        blocked_labels = {normalized_label(label) for label in context_path}
+        blocked_labels.update(
+            normalized_label(session.nodes[child_id].label)
+            for child_id in node.child_ids
+            if child_id in session.nodes
+        )
+        known_topics = sorted(set(session.known_topics) | blocked_labels)
+
         revealed_node_ids: list[str] = []
-        async for event in expand_phase2_node(node.label, session.known_topics, goal_label):
+        async for event in expand_phase2_node(
+            node.label,
+            known_topics,
+            goal_label,
+            context_path=context_path,
+        ):
             event_name = event["event"]
             data = event["data"]
 
