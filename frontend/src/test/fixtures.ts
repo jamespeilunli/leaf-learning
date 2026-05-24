@@ -13,6 +13,7 @@ export function makeNode(overrides: Partial<GraphNode> & Pick<GraphNode, 'id' | 
     depth: 0,
     chat_history: [],
     explain_more_text: null,
+    is_visible: true,
     ...overrides,
   }
 }

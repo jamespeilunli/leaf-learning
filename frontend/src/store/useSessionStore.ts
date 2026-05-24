@@ -53,8 +53,11 @@ function removeNodesFromSession(session: Session, removed: Set<string>): Session
 
 type ExpandPatch = {
   id?: string
-  resource?: Resource
+  resource?: Resource | null
   sources?: Resource[]
+  node_state?: GraphNode['node_state']
+  phase?: GraphNode['phase']
+  is_visible?: boolean
 }
 
 interface SessionStore {
@@ -473,7 +476,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             ...state.session.nodes,
             [patch.id]: {
               ...node,
-              phase: '2',
+              phase: patch.phase ?? '2',
+              node_state: patch.node_state ?? node.node_state,
+              is_visible: patch.is_visible ?? node.is_visible,
               sources: patch.sources ?? (patch.resource ? [patch.resource] : node.sources),
               resource: patch.resource ?? node.resource,
             },

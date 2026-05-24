@@ -1,3 +1,5 @@
+import logging
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -5,6 +7,27 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+
+def configure_logging() -> None:
+    level_name = os.getenv("ALPHAG3N_LOG_LEVEL", "INFO").strip().upper()
+    level = getattr(logging, level_name, logging.INFO)
+    app_logger = logging.getLogger("app")
+    app_logger.setLevel(level)
+    app_logger.propagate = False
+
+    if app_logger.handlers:
+        for handler in app_logger.handlers:
+            handler.setLevel(level)
+        return
+
+    handler = logging.StreamHandler()
+    handler.setLevel(level)
+    handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+    app_logger.addHandler(handler)
+
+
+configure_logging()
 
 from app.routers import chat, graph, session
 from app.storage import ensure_sessions_dir

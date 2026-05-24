@@ -60,6 +60,9 @@ def delta(text: str) -> object:
 
 
 class StructuredOutputTests(unittest.TestCase):
+    def test_openai_model_default_uses_fast_mini_model(self) -> None:
+        self.assertEqual(ai.MODEL, "gpt-5.4-mini")
+
     def test_phase1_generation_streams_structured_output_items(self) -> None:
         parsed = ai.Phase1ChildrenResponse(
             nodes=[
@@ -121,9 +124,9 @@ class StructuredOutputTests(unittest.TestCase):
         responses = FakeResponses(
             parsed,
             [
-                delta(f'{{"sources":[{first_source}'),
-                delta(f',{second_source}],"prerequisites":[{first_prereq}'),
-                delta(f',{second_prereq}]}}'),
+                delta(f'{{"prerequisites":[{first_prereq}'),
+                delta(f',{second_prereq}],"sources":[{first_source}'),
+                delta(f',{second_source}]}}'),
             ],
         )
         client = SimpleNamespace(responses=responses)
@@ -138,11 +141,13 @@ class StructuredOutputTests(unittest.TestCase):
         self.assertEqual(responses.calls[0]["text_format"], ai.Phase2ExpansionResponse)
         self.assertEqual(responses.calls[0]["tools"], [{"type": "web_search_preview"}])
         node_updates = [event for event in events if event["event"] == "node_updated"]
+        first_node_index = [event["event"] for event in events].index("node_added")
+        first_update_index = [event["event"] for event in events].index("node_updated")
+        self.assertLess(first_node_index, first_update_index)
         self.assertEqual(len(node_updates[0]["data"]["sources"]), 1)
         self.assertEqual(len(node_updates[-1]["data"]["sources"]), 2)
         self.assertEqual([event["event"] for event in events].count("node_added"), 2)
         self.assertEqual([event["event"] for event in events].count("edge_added"), 2)
-        first_node_index = [event["event"] for event in events].index("node_added")
         self.assertLess(first_node_index, len(events) - 1)
         self.assertEqual(events[-1]["event"], "stream_done")
 

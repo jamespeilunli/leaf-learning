@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -15,6 +16,11 @@ from app.main import app
 
 def configure_test_ai_mode() -> None:
     os.environ["ALPHAG3N_AI_MODE"] = "mock"
+    os.environ["ALPHAG3N_USE_OPENAI"] = "false"
+    app_logger = logging.getLogger("app")
+    app_logger.setLevel(logging.CRITICAL)
+    for handler in app_logger.handlers:
+        handler.setLevel(logging.CRITICAL)
 
 
 @contextmanager
