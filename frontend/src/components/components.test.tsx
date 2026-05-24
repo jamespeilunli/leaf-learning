@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { forwardRef, useImperativeHandle } from 'react'
 import type { ComponentType, ReactNode } from 'react'
@@ -265,6 +265,28 @@ describe('frontend components', () => {
       />,
     )
     expect(screen.getByText('Learned elsewhere')).toBeInTheDocument()
+  })
+
+  it('GrayedNode activates on pointer down and keeps delete isolated', async () => {
+    const session = makePhase2Session()
+    setStoreSession(session)
+    mockedStreamSSE.mockImplementation(async function* () {})
+    mockedApi.deleteNode.mockResolvedValue({ removed_node_ids: ['prereq'] })
+
+    render(
+      <GrayedNode data={{ node: session.nodes.prereq }} {...nodeProps('prereq')} />,
+    )
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Activate Vector Spaces' }), {
+      button: 0,
+    })
+    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/prereq/expand', {})
+
+    mockedStreamSSE.mockClear()
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Remove Vector Spaces' }), {
+      button: 0,
+    })
+    expect(mockedStreamSSE).not.toHaveBeenCalled()
   })
 
   it('GraphCanvas renders the Phase 2 graph chrome and Back control', async () => {

@@ -27,12 +27,17 @@ export function GrayedNode({ data }: NodeProps<{ node: GraphNode }>) {
       className="group relative h-[132px] w-[236px] cursor-pointer rounded-[var(--radius-sm)] border border-dashed border-[var(--line-strong)] bg-white/62 p-3 text-left opacity-85 shadow-[0_10px_22px_rgba(15,23,42,0.10)] backdrop-blur transition hover:border-[var(--accent)] hover:bg-white/76 hover:opacity-100 hover:shadow-[0_16px_34px_rgba(15,23,42,0.16)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 aria-disabled:cursor-default"
       role="button"
       tabIndex={isDisabled ? -1 : 0}
-      onClick={activateNode}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
           activateNode()
         }
+      }}
+      onPointerDown={(event) => {
+        event.stopPropagation()
+        if (event.button !== 0) return
+        event.currentTarget.focus()
+        activateNode()
       }}
     >
       <Handle position={Position.Top} style={{ opacity: 0 }} type="target" />
@@ -56,6 +61,7 @@ export function GrayedNode({ data }: NodeProps<{ node: GraphNode }>) {
             aria-label={`Remove ${node.label}`}
             className="grid h-7 w-7 place-items-center rounded-full border border-rose-200 bg-rose-50 text-rose-700 shadow-sm transition hover:bg-rose-600 hover:text-white"
             type="button"
+            onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation()
               void deleteNode(node.id)
