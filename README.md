@@ -2,6 +2,9 @@
 
 Leaf Learning is an AI-powered exploration tool built for the 2026 ALPHAG3N Human-centered AI Hackathon hosted at Stanford University. It helps learners turn a vague curiosity into a concrete learning path by combining interactive knowledge graphs with personalized prerequisite trees.
 
+[[Slideshow](https://docs.google.com/presentation/d/1O70yJyQQsI6SDCcgTr-VmOmwUYT0BXM5DgHIcuE9isM/edit?usp=sharing)]
+[[Writeup](https://docs.google.com/document/d/16RewLLMIMhGDrjEX0XKtfAtOPtV-31ZVWJKKyrUm_B8/edit?usp=sharing)]
+
 ## Overview
 
 People often want to learn something new but do not yet know the shape of the field, what related ideas exist, or which fundamentals they need first. Leaf Learning addresses that gap by acting as a learner-directed guide from initial curiosity to actionable next steps.
