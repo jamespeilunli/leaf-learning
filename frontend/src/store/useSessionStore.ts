@@ -13,6 +13,7 @@ function normalizedLabel(label: string): string {
 type ExpandPatch = {
   id?: string
   resource?: Resource
+  sources?: Resource[]
 }
 
 interface SessionStore {
@@ -22,6 +23,7 @@ interface SessionStore {
   streamingNodeIds: Set<string>
   explainingNodeIds: Set<string>
   chatOpenNodeId: string | null
+  selectedPhase2NodeId: string | null
   error: string | null
   initSession: (topic: string) => Promise<void>
   loadSession: (id: string) => Promise<void>
@@ -32,9 +34,12 @@ interface SessionStore {
   explainNode: (nodeId: string) => Promise<void>
   markLearned: (nodeId: string) => Promise<void>
   deleteNode: (nodeId: string) => Promise<void>
+  suggestPrerequisite: (nodeId: string, message: string) => Promise<void>
   restartFlow: () => void
   openChat: (nodeId: string) => void
   closeChat: () => void
+  openNodeDetails: (nodeId: string) => void
+  closeNodeDetails: () => void
   _applyNodeAdded: (node: GraphNode) => void
   _applyNodeUpdated: (patch: ExpandPatch) => void
   _applyEdgeAdded: (edge: GraphEdge) => void
@@ -47,6 +52,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   streamingNodeIds: new Set<string>(),
   explainingNodeIds: new Set<string>(),
   chatOpenNodeId: null,
+  selectedPhase2NodeId: null,
   error: null,
 
   async initSession(topic) {
@@ -295,6 +301,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
+  async suggestPrerequisite(nodeId, message) {
+    const { sessionId } = get()
+    const trimmed = message.trim()
+    if (!sessionId || !trimmed) return
+
+    set({ error: null })
+    try {
+      const { node, edge } = await api.suggestPrerequisite(sessionId, nodeId, trimmed)
+      get()._applyNodeAdded(node)
+      get()._applyEdgeAdded(edge)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Failed to add prerequisite.' })
+    }
+  },
+
   restartFlow() {
     localStorage.removeItem(SESSION_STORAGE_KEY)
     set({
@@ -304,6 +325,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       streamingNodeIds: new Set<string>(),
       explainingNodeIds: new Set<string>(),
       chatOpenNodeId: null,
+      selectedPhase2NodeId: null,
       error: null,
     })
   },
@@ -314,6 +336,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   closeChat() {
     set({ chatOpenNodeId: null })
+  },
+
+  openNodeDetails(nodeId) {
+    set({ selectedPhase2NodeId: nodeId })
+  },
+
+  closeNodeDetails() {
+    set({ selectedPhase2NodeId: null })
   },
 
   _applyNodeAdded(node) {
@@ -356,6 +386,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             [patch.id]: {
               ...node,
               phase: '2',
+              sources: patch.sources ?? (patch.resource ? [patch.resource] : node.sources),
               resource: patch.resource ?? node.resource,
             },
           },

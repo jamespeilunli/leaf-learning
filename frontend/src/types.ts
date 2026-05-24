@@ -20,6 +20,7 @@ export interface GraphNode {
   why_interesting: string | null
   phase: Phase
   node_state: NodeState
+  sources: Resource[]
   resource: Resource | null
   parent_id: string | null
   child_ids: string[]

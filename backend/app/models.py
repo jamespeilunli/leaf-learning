@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def new_id() -> str:
@@ -40,11 +40,18 @@ class GraphNode(BaseModel):
     phase: Phase
     node_state: NodeState = "grayed"
     resource: Resource | None = None
+    sources: list[Resource] = Field(default_factory=list)
     parent_id: str | None = None
     child_ids: list[str] = Field(default_factory=list)
     depth: int = 0
     chat_history: list[ChatMessage] = Field(default_factory=list)
     explain_more_text: str | None = None
+
+    @model_validator(mode="after")
+    def backfill_sources_from_resource(self) -> "GraphNode":
+        if not self.sources and self.resource is not None:
+            self.sources = [self.resource]
+        return self
 
 
 class GraphEdge(BaseModel):

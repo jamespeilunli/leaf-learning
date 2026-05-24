@@ -246,13 +246,33 @@ def _generic_deep_dive(node_label: str) -> dict[str, object]:
     start = _stable_index(node_label, len(concepts))
     prerequisites = [concepts[(start + offset) % len(concepts)] for offset in range(3)]
     return {
-        "resource": {
-            "url": f"https://example.com/mock/{_key(node_label).replace(' ', '-')}",
-            "title": f"Mock Deep Dive: {node_label}",
-            "description": f"A deterministic technical test resource for {node_label}, including examples, assumptions, and follow-on prerequisites.",
-        },
+        "sources": [
+            {
+                "url": f"https://example.com/mock/{_key(node_label).replace(' ', '-')}",
+                "title": f"Mock Deep Dive: {node_label}",
+                "description": f"A deterministic technical test resource for {node_label}, including examples, assumptions, and follow-on prerequisites.",
+            },
+            {
+                "url": f"https://example.com/mock/{_key(node_label).replace(' ', '-')}-reference",
+                "title": f"Technical Reference: {node_label}",
+                "description": f"A secondary mock reference for definitions, assumptions, and terminology around {node_label}.",
+            },
+        ],
         "prerequisites": prerequisites,
     }
+
+
+def _fixture_sources(fixture: dict[str, object], node_label: str) -> list[Resource]:
+    if "sources" in fixture:
+        return [Resource.model_validate(item) for item in fixture["sources"]]  # type: ignore[index]
+
+    primary = Resource.model_validate(fixture["resource"])
+    companion = Resource(
+        url=f"https://example.com/mock/{_key(node_label).replace(' ', '-')}-companion",
+        title=f"Companion Notes: {node_label}",
+        description=f"A short companion reference with technical definitions and assumptions for {node_label}.",
+    )
+    return [primary, companion]
 
 
 async def expand_phase2_node(
@@ -260,11 +280,11 @@ async def expand_phase2_node(
 ) -> AsyncGenerator[dict, None]:
     fixture = DEEP_DIVE_FIXTURES.get(_key(node_label)) or _generic_deep_dive(node_label)
 
-    resource = Resource.model_validate(fixture["resource"])
+    sources = _fixture_sources(fixture, node_label)
     yield {
         "event": "node_updated",
         "data": {
-            "resource": resource.model_dump(),
+            "sources": [source.model_dump() for source in sources],
         },
     }
 
@@ -289,6 +309,24 @@ async def explain_prerequisite(
         f"the main topic make sense without skipping a hidden assumption. For testing, this "
         "text is deterministic and proves the explain-more flow works without calling OpenAI."
     )
+
+
+async def suggest_prerequisite(
+    user_message: str,
+    parent_label: str,
+    parent_description: str,
+) -> dict[str, str]:
+    label = " ".join(user_message.strip().split())[:80].strip(" ?.,")
+    if not label:
+        label = f"{parent_label} Supporting Concept"
+    title = label.title()
+    return {
+        "label": title,
+        "description": (
+            f"{title} is a user-suggested prerequisite for {parent_label}; "
+            "it captures a supporting concept that the generated roadmap did not include."
+        ),
+    }
 
 
 async def chat_with_node(
