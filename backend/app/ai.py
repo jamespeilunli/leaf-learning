@@ -10,7 +10,7 @@ from app import mock_ai
 from app.models import ChatMessage, GraphEdge, GraphNode, Resource
 
 
-MODEL = "gpt-4o"
+MODEL = "gpt-5.4-mini"
 API_KEY_PLACEHOLDER = "sk-your-key-here"
 _client: AsyncOpenAI | None = None
 
@@ -174,16 +174,11 @@ Explain topics at a technical level with formal, precise, mechanism-focused deta
 
 Search for and read the single best source that genuinely explains "{node_label}" at this technical level.
 The source must explain how to do or derive something concrete, not just introduce or define the topic.
-It must be freely accessible without a paywall, login wall, subscription, trial signup, institutional access,
-or hidden full text. If the best-looking result is paywalled, reject it and choose the best non-paywalled source.
-After choosing the source, scan the actual source content and derive prerequisites from what it uses or assumes.
-
-Build a finite dependency roadmap for "{node_label}".
-Each child node must be necessary for understanding the node immediately before it in the graph.
+It must be freely accessible without a paywall.
+After choosing the source, scan the actual source content and derive prerequisites for understanding.
 For every prerequisite hint, explicitly state how that prerequisite is used by "{node_label}".
 Prefer actionable technique, derivation, implementation, or decision nodes over broad category labels.
 
-If "{node_label}" is broad, split it into concrete routes or methods that a learner can execute.
 Example: for "localization", useful child nodes include "analytical localization solve" and
 "iterative localization solve"; the iterative route should point to a source about implementing an
 iterative solver, and its later expansion should surface specific mechanics such as matrix exponentials
@@ -212,12 +207,8 @@ Return ONLY a JSON object with this exact shape:
   ]
 }}
 
-sources must contain exactly 1 high-quality, non-paywalled technical source: the one you think will work best.
+sources must contain exactly 1 high-quality, non-paywalled technical source
 The source description must say what concrete method, derivation, or implementation the source teaches.
-Do not include paywalled abstracts, purchase pages, previews, snippets, or sources whose technical body you cannot access.
-If you include a method node, the single source must directly teach that method.
-prerequisites must be topics directly used or assumed by the selected source — not general background.
-Return 3 to 6 prerequisites unless fewer are genuinely needed.
 Stop at a learnable endpoint: do not create an endless stream of restatements at different abstraction levels.
 Do NOT include any of these topics as prerequisites, the user already knows them: {known_topics}
 Return ONLY the JSON object. No prose, no markdown fences.
