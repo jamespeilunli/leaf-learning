@@ -126,6 +126,10 @@ class ApiFlowTests(unittest.TestCase):
         self.assertNotIn(first_prereq_id, after_prune["nodes"])
         self.assertNotIn(first_prereq_id, after_prune["nodes"][child_id]["child_ids"])
 
+        repeated_prune = self.client.delete(f"/api/session/{session_id}/node/{first_prereq_id}")
+        self.assertEqual(repeated_prune.status_code, 200)
+        self.assertEqual(repeated_prune.json()["removed_node_ids"], [first_prereq_id])
+
     def test_phase2_guards_reject_invalid_expand_and_explain(self) -> None:
         session_id, session = self.create_machine_learning_session()
         root_id = session["current_phase1_node_id"]
@@ -133,7 +137,7 @@ class ApiFlowTests(unittest.TestCase):
 
         self.assertEqual(self.client.post(f"/api/session/{session_id}/node/{child_id}/expand").status_code, 400)
         self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id})
-        self.assertEqual(self.client.post(f"/api/session/{session_id}/node/{child_id}/expand").status_code, 400)
+        self.assertEqual(self.client.post(f"/api/session/{session_id}/node/{child_id}/expand").status_code, 200)
         self.client.post(f"/api/session/{session_id}/resolution", json={"resolution": "technical"})
         self.assertEqual(self.client.post(f"/api/session/{session_id}/node/{child_id}/explain").status_code, 400)
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import AsyncGenerator
+from typing import TypeVar
 
 from openai import AsyncOpenAI
+from pydantic import BaseModel, Field
 
 from app import mock_ai
 from app.models import ChatMessage, GraphEdge, GraphNode, Resource
@@ -13,6 +14,32 @@ from app.models import ChatMessage, GraphEdge, GraphNode, Resource
 MODEL = "gpt-4o"
 API_KEY_PLACEHOLDER = "sk-your-key-here"
 _client: AsyncOpenAI | None = None
+ParsedResponseT = TypeVar("ParsedResponseT", bound=BaseModel)
+
+
+class Phase1Child(BaseModel):
+    label: str
+    description: str
+    why_interesting: str
+
+
+class Phase1ChildrenResponse(BaseModel):
+    nodes: list[Phase1Child] = Field(min_length=4, max_length=6)
+
+
+class Phase2Prerequisite(BaseModel):
+    label: str
+    hint: str
+
+
+class Phase2ExpansionResponse(BaseModel):
+    sources: list[Resource] = Field(min_length=2, max_length=4)
+    prerequisites: list[Phase2Prerequisite]
+
+
+class SuggestedPrerequisiteResponse(BaseModel):
+    label: str
+    description: str
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -57,15 +84,13 @@ def _extract_response_text(response: object) -> str:
     return "".join(chunks).strip() or getattr(response, "output_text", "") or ""
 
 
-def _loads_json_object(text: str) -> dict:
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            raise
-        return json.loads(text[start : end + 1])
+def _require_output_parsed(response: object, expected_type: type[ParsedResponseT]) -> ParsedResponseT:
+    output_parsed = getattr(response, "output_parsed", None)
+    if output_parsed is None:
+        raise RuntimeError("OpenAI returned no parsed structured output.")
+    if not isinstance(output_parsed, expected_type):
+        raise TypeError(f"OpenAI returned {type(output_parsed).__name__}; expected {expected_type.__name__}.")
+    return output_parsed
 
 
 async def generate_phase1_children(
@@ -78,35 +103,28 @@ async def generate_phase1_children(
 
     instructions = f"""
 You generate a learning topic exploration tree.
-Return ONLY a JSON object with this exact shape:
-{{
-  "nodes": [
-    {{
-      "label": "string",
-      "description": "string (exactly 2 sentences describing the subtopic)",
-      "why_interesting": "string (exactly 1 sentence on why someone learning would care)"
-    }}
-  ]
-}}
 Generate 4 to 6 subtopics of "{current_label}".
 The user's selection path so far (most general to most specific): {ancestor_labels}.
 Each subtopic must be meaningfully distinct from the others and from any ancestor in the path.
 Do not repeat or rephrase topics already in the selection path.
+Each description must be exactly 2 sentences.
+Each why_interesting value must be exactly 1 sentence on why someone learning would care.
 """.strip()
 
     try:
-        response = await get_client().responses.create(
+        response = await get_client().responses.parse(
             model=MODEL,
             instructions=instructions,
             input=f"Generate subtopics for {current_label}.",
+            text_format=Phase1ChildrenResponse,
         )
-        payload = _loads_json_object(_extract_response_text(response))
+        payload = _require_output_parsed(response, Phase1ChildrenResponse)
 
-        for item in payload["nodes"]:
+        for item in payload.nodes:
             node = GraphNode(
-                label=item["label"],
-                description=item["description"],
-                why_interesting=item["why_interesting"],
+                label=item.label,
+                description=item.description,
+                why_interesting=item.why_interesting,
                 phase="1",
                 node_state="expanded",
             )
@@ -136,51 +154,34 @@ Explain topics at a technical level with formal, precise, mechanism-focused deta
 Search for and read the best resources that genuinely explain "{node_label}" at this technical level.
 The resources must explain the topic in depth, not just introduce it.
 
-Return ONLY a JSON object with this exact shape:
-{{
-  "sources": [
-    {{
-      "url": "string",
-      "title": "string",
-      "description": "string (1–2 sentences on exactly what this resource covers and why it's useful)"
-    }}
-  ],
-  "prerequisites": [
-    {{
-      "label": "string",
-      "hint": "string (1 sentence: what this prerequisite is and why the resource uses it)"
-    }}
-  ]
-}}
-
 sources must contain 2 to 4 high-quality technical resources.
+Each source description must be 1 to 2 sentences on exactly what the resource covers and why it's useful.
 prerequisites must be topics directly used or assumed by these resources — not general background.
+Each prerequisite hint must be 1 sentence explaining what this prerequisite is and why the resources use it.
 Do NOT include any of these topics as prerequisites, the user already knows them: {known_topics}
-Return ONLY the JSON object. No prose, no markdown fences.
 """.strip()
 
     try:
-        response = await get_client().responses.create(
+        response = await get_client().responses.parse(
             model=MODEL,
             instructions=instructions,
             input=f"Expand the learning node for {node_label}.",
             tools=[{"type": "web_search_preview"}],
+            text_format=Phase2ExpansionResponse,
         )
-        payload = _loads_json_object(_extract_response_text(response))
+        payload = _require_output_parsed(response, Phase2ExpansionResponse)
 
-        raw_sources = payload.get("sources") or [payload["resource"]]
-        sources = [Resource.model_validate(item) for item in raw_sources[:4]]
         yield {
             "event": "node_updated",
             "data": {
-                "sources": [source.model_dump() for source in sources],
+                "sources": [source.model_dump() for source in payload.sources],
             },
         }
 
-        for item in payload["prerequisites"]:
+        for item in payload.prerequisites:
             node = GraphNode(
-                label=item["label"],
-                description=item["hint"],
+                label=item.label,
+                description=item.hint,
                 phase="2",
                 node_state="grayed",
             )
@@ -233,25 +234,21 @@ async def suggest_prerequisite(
 You convert a user's note into a clean prerequisite node for a learning roadmap.
 The parent topic is "{parent_label}" ({parent_description}).
 
-Return ONLY a JSON object with this exact shape:
-{{
-  "label": "string (short technical concept name)",
-  "description": "string (1 sentence explaining what it is and why it supports the parent topic)"
-}}
-
 The result should be a prerequisite or supporting concept, not a question.
-No markdown fences. No prose outside JSON.
+The label should be a short technical concept name.
+The description should be 1 sentence explaining what it is and why it supports the parent topic.
 """.strip()
 
-    response = await get_client().responses.create(
+    response = await get_client().responses.parse(
         model=MODEL,
         instructions=instructions,
         input=user_message,
+        text_format=SuggestedPrerequisiteResponse,
     )
-    payload = _loads_json_object(_extract_response_text(response))
+    payload = _require_output_parsed(response, SuggestedPrerequisiteResponse)
     return {
-        "label": str(payload["label"]).strip(),
-        "description": str(payload["description"]).strip(),
+        "label": payload.label.strip(),
+        "description": payload.description.strip(),
     }
 
 

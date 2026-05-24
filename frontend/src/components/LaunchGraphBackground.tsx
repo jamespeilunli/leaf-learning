@@ -15,6 +15,7 @@ import {
   type LaunchGraphLink,
   type LaunchGraphNode,
 } from "./launchGraph";
+import { getLaunchGraphOrigin } from "./launchGraphBackgroundLayout";
 
 const GRAPH_NODES = buildLaunchGraph();
 const GRAPH_LINKS = buildLaunchGraphLinks(GRAPH_NODES);
@@ -34,13 +35,6 @@ function easeOutBack(progress: number) {
   const s = 1.70158;
   const shifted = progress - 1;
   return 1 + shifted * shifted * ((s + 1) * shifted + s);
-}
-
-export function getLaunchGraphOrigin(width: number, height: number) {
-  return {
-    x: width / 2,
-    y: height / 4,
-  };
 }
 
 export function LaunchGraphBackground() {
