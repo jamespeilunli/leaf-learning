@@ -6,7 +6,7 @@ export function makeNode(overrides: Partial<GraphNode> & Pick<GraphNode, 'id' | 
     why_interesting: null,
     phase: '1',
     node_state: 'expanded',
-    intuition_score: null,
+    sources: [],
     resource: null,
     parent_id: null,
     child_ids: [],
@@ -45,7 +45,7 @@ export function makeSession(overrides: Partial<Session> = {}): Session {
     id: 'session-1',
     created_at: '2026-01-01T00:00:00Z',
     phase: '1',
-    resolution: null,
+    resolution: 'technical',
     root_topic: 'Machine Learning',
     selection_history: [],
     current_phase1_node_id: 'root',
@@ -68,12 +68,18 @@ export function makePhase2Session(overrides: Partial<Session> = {}): Session {
     description: 'How models learn useful internal features.',
     phase: '2',
     node_state: 'expanded',
-    intuition_score: 0.42,
     resource: {
       url: 'https://example.com/representation',
       title: 'Representation Resource',
       description: 'A resource about embeddings and latent spaces.',
     },
+    sources: [
+      {
+        url: 'https://example.com/representation',
+        title: 'Representation Resource',
+        description: 'A resource about embeddings and latent spaces.',
+      },
+    ],
     child_ids: ['prereq', 'duplicate'],
   })
   const prereq = makeNode({
@@ -99,7 +105,7 @@ export function makePhase2Session(overrides: Partial<Session> = {}): Session {
   return {
     ...makeSession(),
     phase: '2',
-    resolution: 'intuitive',
+    resolution: 'technical',
     current_phase1_node_id: 'goal',
     focus_node_id: 'goal',
     nodes: {

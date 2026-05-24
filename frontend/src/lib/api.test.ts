@@ -53,18 +53,22 @@ describe('api client', () => {
     mocks.del.mockResolvedValue({ data: { removed_node_ids: ['node-1'] } })
 
     await api.selectTopic('session-1', 'node-1')
+    await api.expandPhase1Topic('session-1', 'node-1')
     await api.back('session-1')
-    await api.setResolution('session-1', 'technical')
     await api.deepDive('session-1', 'node-1')
     await api.explainNode('session-1', 'node-1')
+    await api.suggestPrerequisite('session-1', 'node-1', 'add linear algebra')
     await api.updateNodeState('session-1', 'node-1', 'learned')
     await expect(api.deleteNode('session-1', 'node-1')).resolves.toEqual({ removed_node_ids: ['node-1'] })
 
     expect(mocks.post).toHaveBeenCalledWith('/session/session-1/select-topic', { node_id: 'node-1' })
+    expect(mocks.post).toHaveBeenCalledWith('/session/session-1/phase1-expand', { node_id: 'node-1' })
     expect(mocks.post).toHaveBeenCalledWith('/session/session-1/back')
-    expect(mocks.post).toHaveBeenCalledWith('/session/session-1/resolution', { resolution: 'technical' })
     expect(mocks.post).toHaveBeenCalledWith('/session/session-1/deep-dive', { node_id: 'node-1' })
     expect(mocks.post).toHaveBeenCalledWith('/session/session-1/node/node-1/explain')
+    expect(mocks.post).toHaveBeenCalledWith('/session/session-1/node/node-1/suggest-prerequisite', {
+      message: 'add linear algebra',
+    })
     expect(mocks.patch).toHaveBeenCalledWith('/session/session-1/node/node-1/status', { node_state: 'learned' })
     expect(mocks.del).toHaveBeenCalledWith('/session/session-1/node/node-1')
   })

@@ -30,6 +30,11 @@ export async function selectTopic(sessionId: string, nodeId: string): Promise<Se
   return response.data
 }
 
+export async function expandPhase1Topic(sessionId: string, nodeId: string): Promise<Session> {
+  const response = await http.post(`/session/${sessionId}/phase1-expand`, { node_id: nodeId })
+  return response.data
+}
+
 export async function back(sessionId: string): Promise<Session> {
   const response = await http.post(`/session/${sessionId}/back`)
   return response.data
