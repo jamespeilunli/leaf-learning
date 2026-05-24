@@ -7,6 +7,7 @@ export function resetSessionStore() {
     isLoading: false,
     streamingNodeIds: new Set<string>(),
     explainingNodeIds: new Set<string>(),
+    deletingNodeIds: new Set<string>(),
     chatOpenNodeId: null,
     selectedPhase2NodeId: null,
     error: null,

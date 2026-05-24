@@ -172,7 +172,10 @@ async def explain_node(session_id: str, node_id: str) -> dict:
 @router.delete("/session/{session_id}/node/{node_id}")
 def delete_node(session_id: str, node_id: str) -> dict:
     session = load_session(session_id)
-    node = _get_node(session, node_id)
+    node = session.nodes.get(node_id)
+    if not node:
+        return {"removed_node_ids": [node_id]}
+
     removed_node_ids = _collect_descendants(session, node_id)
 
     if node.parent_id and node.parent_id in session.nodes:

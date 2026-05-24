@@ -173,6 +173,46 @@ describe('useSessionStore', () => {
     expect(pruned.edges.some((edge) => edge.to === 'prereq')).toBe(false)
   })
 
+  it('removes stale local subtrees when the backend already pruned them', async () => {
+    const session = makePhase2Session()
+    session.nodes.prereq.child_ids = ['nested']
+    session.nodes.nested = makeNode({
+      id: 'nested',
+      label: 'Nested prerequisite',
+      phase: '2',
+      node_state: 'grayed',
+      parent_id: 'prereq',
+      depth: 2,
+    })
+    session.edges.push({ id: 'edge-nested', from: 'prereq', to: 'nested', label: 'requires' })
+    useSessionStore.setState({
+      sessionId: 'session-1',
+      session,
+      chatOpenNodeId: 'nested',
+      selectedPhase2NodeId: 'prereq',
+      streamingNodeIds: new Set(['nested']),
+      explainingNodeIds: new Set(['prereq']),
+    })
+    mockedApi.deleteNode.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 404 },
+      message: 'not found',
+    })
+
+    await getState().deleteNode('prereq')
+
+    const pruned = getState().session as Session
+    expect(pruned.nodes.prereq).toBeUndefined()
+    expect(pruned.nodes.nested).toBeUndefined()
+    expect(pruned.nodes.goal.child_ids).not.toContain('prereq')
+    expect(pruned.edges.some((edge) => edge.to === 'nested')).toBe(false)
+    expect(getState().chatOpenNodeId).toBeNull()
+    expect(getState().selectedPhase2NodeId).toBeNull()
+    expect(getState().streamingNodeIds.has('nested')).toBe(false)
+    expect(getState().explainingNodeIds.has('prereq')).toBe(false)
+    expect(getState().error).toBeNull()
+  })
+
   it('manages chat visibility and back-to-start restart state', () => {
     useSessionStore.setState({
       sessionId: 'session-1',
