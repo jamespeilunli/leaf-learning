@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from collections.abc import AsyncGenerator
 from typing import TypeVar
 
@@ -9,10 +10,12 @@ from pydantic import BaseModel, Field
 
 from app import mock_ai
 from app.models import ChatMessage, GraphEdge, GraphNode, Resource
+from app.resource_validation import endpoint_validation_result
 
 
 MODEL = "gpt-5.4-mini"
 API_KEY_PLACEHOLDER = "sk-your-key-here"
+logger = logging.getLogger(__name__)
 _client: AsyncOpenAI | None = None
 ParsedResponseT = TypeVar("ParsedResponseT", bound=BaseModel)
 
@@ -40,6 +43,10 @@ class Phase2ExpansionResponse(BaseModel):
 class SuggestedPrerequisiteResponse(BaseModel):
     label: str
     description: str
+
+
+class ReplacementResourceResponse(BaseModel):
+    source: Resource
 
 
 class _JsonArrayItemStream:
@@ -128,6 +135,150 @@ def _stream_text_delta(event: object) -> str:
     if getattr(event, "type", None) != "response.output_text.delta":
         return ""
     return getattr(event, "delta", "") or ""
+
+
+async def _replacement_phase2_source(
+    *,
+    node_label: str,
+    goal_label: str,
+    rejected_source: Resource,
+    rejected_urls: list[str],
+) -> Resource:
+    instructions = f"""
+You generated a source URL for a learning roadmap node, but the app checked the URL
+and found that the endpoint does not exist.
+
+Rerun only this one source JSON item for the node "{node_label}" in the learning goal "{goal_label}".
+Return exactly one replacement source.
+The replacement URL must be a real, directly reachable HTTP or HTTPS endpoint.
+Do not reuse any rejected URL: {rejected_urls}
+The source must explain "{node_label}" in technical depth, but should not be an academic paper (rather, it should be an article or documentation usable by a beginner to the field)
+The description must be exactly 1 sentence on what the resource covers and why it's useful.
+""".strip()
+
+    response = await get_client().responses.parse(
+        model=MODEL,
+        instructions=instructions,
+        input=(
+            "Replace this invalid source JSON item: "
+            f"{rejected_source.model_dump_json()}"
+        ),
+        tools=[{"type": "web_search_preview"}],
+        text_format=ReplacementResourceResponse,
+    )
+    return _require_output_parsed(response, ReplacementResourceResponse).source
+
+
+async def _valid_or_replacement_phase2_source(
+    *,
+    source: Resource,
+    node_label: str,
+    goal_label: str,
+    accepted_urls: set[str],
+    replacement_attempts: int = 2,
+) -> Resource | None:
+    rejected_urls: list[str] = []
+    candidate = source
+
+    for attempt in range(replacement_attempts + 1):
+        if candidate.url in accepted_urls:
+            logger.info(
+                "Rejected phase2 source url=%s node_label=%r reason=%s",
+                candidate.url,
+                node_label,
+                "duplicate source URL",
+            )
+            return None
+
+        validation = await endpoint_validation_result(candidate.url)
+        if validation.exists:
+            return candidate
+
+        logger.info(
+            "Rejected phase2 source url=%s node_label=%r reason=%s",
+            candidate.url,
+            node_label,
+            validation.reason,
+        )
+        rejected_urls.append(candidate.url)
+        if attempt >= replacement_attempts:
+            return None
+
+        candidate = await _replacement_phase2_source(
+            node_label=node_label,
+            goal_label=goal_label,
+            rejected_source=candidate,
+            rejected_urls=rejected_urls,
+        )
+
+    return None
+
+
+async def _accepted_phase2_sources(
+    *,
+    sources: list[Resource],
+    node_label: str,
+    accepted_urls: set[str],
+) -> tuple[list[Resource], list[Resource]]:
+    accepted_sources: list[Resource] = []
+    rejected_sources: list[Resource] = []
+
+    for source in sources:
+        if source.url in accepted_urls:
+            logger.info(
+                "Rejected phase2 source url=%s node_label=%r reason=%s",
+                source.url,
+                node_label,
+                "duplicate source URL",
+            )
+            rejected_sources.append(source)
+            continue
+
+        validation = await endpoint_validation_result(source.url)
+        if validation.exists:
+            accepted_sources.append(source)
+            accepted_urls.add(source.url)
+            continue
+
+        logger.info(
+            "Rejected phase2 source url=%s node_label=%r reason=%s",
+            source.url,
+            node_label,
+            validation.reason,
+        )
+        rejected_sources.append(source)
+
+    return accepted_sources, rejected_sources
+
+
+async def _replacement_phase2_sources(
+    *,
+    rejected_sources: list[Resource],
+    node_label: str,
+    goal_label: str,
+    accepted_urls: set[str],
+) -> list[Resource]:
+    replacements: list[Resource] = []
+
+    for source in rejected_sources:
+        replacement_candidate = await _replacement_phase2_source(
+            node_label=node_label,
+            goal_label=goal_label,
+            rejected_source=source,
+            rejected_urls=[source.url],
+        )
+        replacement = await _valid_or_replacement_phase2_source(
+            source=replacement_candidate,
+            node_label=node_label,
+            goal_label=goal_label,
+            accepted_urls=accepted_urls,
+        )
+        if replacement is None:
+            continue
+        replacements.append(replacement)
+        accepted_urls.add(replacement.url)
+
+    return replacements
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -257,11 +408,11 @@ Explain topics at a technical level with formal, precise, mechanism-focused deta
 Return prerequisites first so the UI can stream graph nodes immediately.
 Then return sources.
 
-prerequisites must contain 2 to 4 topics directly used or assumed by technical resources on this topic — not general background.
+prerequisites must contain topics directly used or assumed by technical resources on this topic — not general background. If the current topic is a natural stopping point, e.g. if it is simple enough, you are not required to provide prerequisites.
 Choose prerequisites as the next lower layer in a six-level path from the goal down toward fundamentals.
 For deeper prerequisite nodes, prefer more foundational concepts, so final leaf layers can be learned first and then used to climb back up to "{goal_label}".
 Each prerequisite hint must be 1 sentence explaining what this prerequisite is and why the resources use it.
-sources must contain 2 to 3 high-quality technical resources that explain "{node_label}" in depth.
+sources must contain exactly 1 high-quality technical resource that explains "{node_label}" in depth. The source should not be an academic paper (rather, it should be an article or documentation usable by a beginner to the field)
 Each source description must be exactly 1 sentence on what the resource covers and why it's useful.
 Do NOT include any of these topics as prerequisites, the user already knows them: {known_topics}
 """.strip()
@@ -269,6 +420,9 @@ Do NOT include any of these topics as prerequisites, the user already knows them
     try:
         source_stream = _JsonArrayItemStream("sources", Resource)
         prerequisite_stream = _JsonArrayItemStream("prerequisites", Phase2Prerequisite)
+        accepted_sources: list[Resource] = []
+        accepted_source_urls: set[str] = set()
+        pending_rejected_sources: list[Resource] = []
         async with get_client().responses.stream(
             model=MODEL,
             instructions=instructions,
@@ -283,12 +437,20 @@ Do NOT include any of these topics as prerequisites, the user already knows them
 
                 sources = source_stream.append(delta)
                 if sources:
-                    yield {
-                        "event": "node_updated",
-                        "data": {
-                            "sources": [source.model_dump() for source in source_stream.items],
-                        },
-                    }
+                    accepted, rejected = await _accepted_phase2_sources(
+                        sources=sources,
+                        node_label=node_label,
+                        accepted_urls=accepted_source_urls,
+                    )
+                    if accepted:
+                        accepted_sources.extend(accepted)
+                        yield {
+                            "event": "node_updated",
+                            "data": {
+                                "sources": [source.model_dump() for source in accepted_sources],
+                            },
+                        }
+                    pending_rejected_sources.extend(rejected)
 
                 for item in prerequisite_stream.append(delta):
                     node = GraphNode(
@@ -305,10 +467,36 @@ Do NOT include any of these topics as prerequisites, the user already knows them
             payload = _require_output_parsed(response, Phase2ExpansionResponse)
 
             if source_stream.emitted_count < len(payload.sources):
+                previous_count = len(accepted_sources)
+                accepted, rejected = await _accepted_phase2_sources(
+                    sources=payload.sources[source_stream.emitted_count :],
+                    node_label=node_label,
+                    accepted_urls=accepted_source_urls,
+                )
+                accepted_sources.extend(accepted)
+
+                if len(accepted_sources) > previous_count:
+                    yield {
+                        "event": "node_updated",
+                        "data": {
+                            "sources": [source.model_dump() for source in accepted_sources],
+                        },
+                    }
+
+                pending_rejected_sources.extend(rejected)
+
+            replacements = await _replacement_phase2_sources(
+                rejected_sources=pending_rejected_sources,
+                node_label=node_label,
+                goal_label=goal_label,
+                accepted_urls=accepted_source_urls,
+            )
+            if replacements:
+                accepted_sources.extend(replacements)
                 yield {
                     "event": "node_updated",
                     "data": {
-                        "sources": [source.model_dump() for source in payload.sources],
+                        "sources": [source.model_dump() for source in accepted_sources],
                     },
                 }
 

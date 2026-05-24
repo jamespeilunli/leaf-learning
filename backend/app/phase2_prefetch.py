@@ -9,7 +9,7 @@ from app.ai import expand_phase2_node
 from app.models import GraphEdge, GraphNode, Resource, Session
 
 
-PHASE2_MAX_DEPTH_FROM_FOCUS = 6
+PHASE2_MAX_DEPTH_FROM_FOCUS = 2
 PHASE2_MAX_DEPTH_ENV = "ALPHAG3N_PHASE2_MAX_DEPTH"
 logger = logging.getLogger(__name__)
 
