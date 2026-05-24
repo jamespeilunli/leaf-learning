@@ -70,7 +70,7 @@ class ApiFlowTests(unittest.TestCase):
         self.assertEqual(backed["selection_history"], [])
         self.assertEqual(self.client.post(f"/api/session/{session_id}/back").status_code, 400)
 
-        resolved = self.client.post(f"/api/session/{session_id}/resolution", json={"resolution": "technical"}).json()
+        resolved = self.client.post(f"/api/session/{session_id}/resolution").json()
         self.assertEqual(resolved["resolution"], "technical")
 
         dived = self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id}).json()["session"]
@@ -82,7 +82,6 @@ class ApiFlowTests(unittest.TestCase):
         session_id, session = self.create_machine_learning_session()
         root_id = session["current_phase1_node_id"]
         child_id = session["nodes"][root_id]["child_ids"][0]
-        self.client.post(f"/api/session/{session_id}/resolution", json={"resolution": "intuitive"})
         dived = self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id}).json()["session"]
 
         child = dived["nodes"][child_id]
@@ -132,14 +131,14 @@ class ApiFlowTests(unittest.TestCase):
         self.assertEqual(self.client.post(f"/api/session/{session_id}/node/{child_id}/expand").status_code, 400)
         self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id})
         self.assertEqual(self.client.post(f"/api/session/{session_id}/node/{child_id}/expand").status_code, 400)
-        self.client.post(f"/api/session/{session_id}/resolution", json={"resolution": "technical"})
+        self.client.post(f"/api/session/{session_id}/resolution")
         self.assertEqual(self.client.post(f"/api/session/{session_id}/node/{child_id}/explain").status_code, 400)
 
     def test_chat_streams_tokens_and_persists_bounded_history(self) -> None:
         session_id, session = self.create_machine_learning_session()
         root_id = session["current_phase1_node_id"]
         child_id = session["nodes"][root_id]["child_ids"][0]
-        self.client.post(f"/api/session/{session_id}/resolution", json={"resolution": "technical"})
+        self.client.post(f"/api/session/{session_id}/resolution")
         self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id})
 
         response = self.client.post(
@@ -155,6 +154,60 @@ class ApiFlowTests(unittest.TestCase):
         self.assertEqual(history[-2]["role"], "user")
         self.assertEqual(history[-2]["content"], "How should I start?")
         self.assertEqual(history[-1]["role"], "assistant")
+
+    def test_phase2_expand_merges_repeated_nodes_and_blocks_ancestor_cycles(self) -> None:
+        session_id, session = self.create_machine_learning_session()
+        root_id = session["current_phase1_node_id"]
+        child_id = session["nodes"][root_id]["child_ids"][0]
+        dived = self.client.post(f"/api/session/{session_id}/deep-dive", json={"node_id": child_id}).json()["session"]
+
+        parent_id = next(
+            node_id
+            for node_id in dived["nodes"][child_id]["child_ids"]
+            if dived["nodes"][node_id]["label"] == "Vector Spaces"
+        )
+        stored = load_session(session_id)
+        stored.nodes[parent_id].node_state = "grayed"
+        stored.nodes[parent_id].child_ids = []
+        stored.edges = [edge for edge in stored.edges if edge.from_id != parent_id and edge.to_id != parent_id]
+        save_session(stored)
+
+        repeated = GraphNode(
+            id="repeated-loss",
+            label="Loss Functions",
+            description="Repeated prerequisite",
+            phase="2",
+            node_state="grayed",
+        )
+        cycle = GraphNode(
+            id="cycle-node",
+            label=dived["nodes"][child_id]["label"],
+            description="Would create an ancestor cycle",
+            phase="2",
+            node_state="grayed",
+        )
+
+        with patch("app.routers.graph.expand_phase2_node") as mocked_expand:
+            async def fake_expand_phase2_node(node_label: str, known_topics: list[str], goal_label: str):
+                yield {"event": "node_added", "data": repeated.model_dump()}
+                yield {"event": "edge_added", "data": {"from": node_label, "to": repeated.id, "label": "requires"}}
+                yield {"event": "node_added", "data": cycle.model_dump()}
+                yield {"event": "edge_added", "data": {"from": node_label, "to": cycle.id, "label": "requires"}}
+                yield {"event": "stream_done", "data": {}}
+
+            mocked_expand.side_effect = fake_expand_phase2_node
+            response = self.client.post(f"/api/session/{session_id}/node/{parent_id}/expand")
+
+        events = parse_sse(response.text)
+        added_nodes = [data for name, data in events if name == "node_added"]
+        self.assertEqual([node["label"] for node in added_nodes], ["Loss Functions"])
+
+        stored = self.client.get(f"/api/session/{session_id}").json()
+        self.assertEqual(
+            [stored["nodes"][node_id]["label"] for node_id in stored["nodes"][parent_id]["child_ids"]],
+            ["Loss Functions"],
+        )
+        self.assertEqual(len(stored["edges"]), len({edge["id"] for edge in stored["edges"]}))
 
 
 if __name__ == "__main__":

@@ -237,7 +237,7 @@ describe('frontend components', () => {
       <GrayedNode data={{ node: session.nodes.prereq }} {...nodeProps('prereq')} />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Activate Vector Spaces' }))
+    await user.click(screen.getAllByRole('button', { name: /Vector Spaces/ })[0])
     expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/prereq/expand', {})
 
     await user.click(screen.getByRole('button', { name: 'Remove Vector Spaces' }))

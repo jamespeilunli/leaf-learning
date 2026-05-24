@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.ai import expand_phase2_node, explain_prerequisite, suggest_prerequisite
+from app.graph_utils import add_phase2_child
 from app.models import GraphEdge, GraphNode, Resource, Session
 from app.storage import load_session, save_session
 
@@ -64,11 +65,12 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
     node.node_state = "expanded"
     save_session(session)
     goal_label = _get_node(session, session.focus_node_id).label
+    child_id_map: dict[str, str] = {}
+    skipped_child_ids: set[str] = set()
 
     async def event_stream() -> Iterable[str]:
         async for event in expand_phase2_node(
             node.label,
-            session.resolution,
             session.known_topics,
             goal_label,
         ):
@@ -89,23 +91,35 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
 
             if event_name == "node_added":
                 child = GraphNode.model_validate(data)
-                child.parent_id = node.id
-                child.depth = node.depth + 1
-                child.phase = "2"
-                child.node_state = "grayed"
-                session.nodes[child.id] = child
-                if child.id not in node.child_ids:
-                    node.child_ids.append(child.id)
+                linked_child, _, _ = add_phase2_child(session, node, child)
+                if not linked_child:
+                    skipped_child_ids.add(child.id)
+                    continue
+                child_id_map[child.id] = linked_child.id
                 save_session(session)
-                yield _sse("node_added", child.model_dump(by_alias=True))
+                yield _sse("node_added", linked_child.model_dump(by_alias=True))
                 continue
 
             if event_name == "edge_added":
                 edge = GraphEdge.model_validate(data)
-                edge.from_id = node.id
-                session.edges.append(edge)
+                if edge.to_id in skipped_child_ids:
+                    continue
+                if edge.to_id in child_id_map:
+                    edge.to_id = child_id_map[edge.to_id]
+                existing = next(
+                    (
+                        current
+                        for current in session.edges
+                        if current.from_id == node.id and current.to_id == edge.to_id
+                    ),
+                    None,
+                )
+                if existing is None:
+                    edge.from_id = node.id
+                    session.edges.append(edge)
+                    existing = edge
                 save_session(session)
-                yield _sse("edge_added", edge.model_dump(by_alias=True))
+                yield _sse("edge_added", existing.model_dump(by_alias=True))
                 continue
 
             save_session(session)
@@ -137,16 +151,13 @@ async def suggest_node_prerequisite(
         description=suggestion["description"],
         phase="2",
         node_state="grayed",
-        parent_id=parent.id,
-        depth=parent.depth + 1,
     )
-    edge = GraphEdge(from_id=parent.id, to_id=child.id, label="requires")
-    session.nodes[child.id] = child
-    parent.child_ids.append(child.id)
-    session.edges.append(edge)
+    linked_child, edge, _ = add_phase2_child(session, parent, child)
+    if not linked_child or edge is None:
+        raise HTTPException(status_code=400, detail="Suggested prerequisite would repeat an ancestor path.")
     save_session(session)
     return {
-        "node": child.model_dump(by_alias=True),
+        "node": linked_child.model_dump(by_alias=True),
         "edge": edge.model_dump(by_alias=True),
     }
 

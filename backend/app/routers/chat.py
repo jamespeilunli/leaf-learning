@@ -58,7 +58,6 @@ async def chat(session_id: str, node_id: str, payload: ChatRequest) -> Streaming
                 node.label,
                 node_description,
                 resource_description,
-                session.resolution,
                 goal_path,
                 node.chat_history[-20:],
                 payload.message,

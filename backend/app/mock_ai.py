@@ -134,7 +134,6 @@ GENERIC_LEAF_LABELS = {
     "measurement criteria",
 }
 
-
 DEEP_DIVE_FIXTURES: dict[str, dict[str, object]] = {
     "representation learning": {
         "resource": {
@@ -295,19 +294,14 @@ def _fixture_sources(fixture: dict[str, object], node_label: str) -> list[Resour
 
 
 async def expand_phase2_node(
-    node_label: str,
-    resolution: str,
-    known_topics: list[str],
-    goal_label: str,
+    node_label: str, known_topics: list[str], goal_label: str
 ) -> AsyncGenerator[dict, None]:
     fixture = DEEP_DIVE_FIXTURES.get(_key(node_label)) or _generic_deep_dive(node_label)
-    intuition_score = 0.35 if resolution == "intuitive" else 0.82
 
     sources = _fixture_sources(fixture, node_label)
     yield {
         "event": "node_updated",
         "data": {
-            "intuition_score": intuition_score,
             "sources": [source.model_dump() for source in sources],
         },
     }
@@ -357,13 +351,12 @@ async def chat_with_node(
     node_label: str,
     node_description: str,
     resource_description: str,
-    resolution: str,
     goal_path: list[str],
     history: list[ChatMessage],
     user_message: str,
 ) -> AsyncGenerator[str, None]:
     response = (
-        f"Mock tutor response for {node_label}: at the {resolution} level, focus on how this "
+        f"Mock tutor response for {node_label}: at the technical level, focus on how this "
         f"topic supports {' > '.join(goal_path)}. Your question was: {user_message.strip()} "
         "This confirms chat streaming works locally without an API key."
     )

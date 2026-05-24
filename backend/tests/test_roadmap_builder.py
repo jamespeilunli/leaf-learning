@@ -8,7 +8,7 @@ from app.roadmap_builder import precompute_phase2_roadmap
 
 
 class RoadmapBuilderTests(unittest.IsolatedAsyncioTestCase):
-    async def test_precompute_merges_duplicate_prerequisites_and_marks_leaves_grayed(self) -> None:
+    async def test_precompute_merges_duplicate_prerequisites_marks_leaves_grayed_and_skips_ancestors(self) -> None:
         focus = GraphNode(id="focus", label="Representation Learning", phase="2", node_state="expanded")
         session = Session(
             root_topic="machine learning",
@@ -19,7 +19,6 @@ class RoadmapBuilderTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_expand_phase2_node(
             node_label: str,
-            resolution: str,
             known_topics: list[str],
             goal_label: str,
         ):
@@ -40,6 +39,7 @@ class RoadmapBuilderTests(unittest.IsolatedAsyncioTestCase):
                 yield {"event": "node_added", "data": GraphNode(id="vs-1", label="Vector Spaces", phase="2").model_dump()}
             elif node_label == "Linear Algebra":
                 yield {"event": "node_added", "data": GraphNode(id="vs-2", label="  vector   spaces  ", phase="2").model_dump()}
+                yield {"event": "node_added", "data": GraphNode(id="cycle", label="Representation Learning", phase="2").model_dump()}
             yield {"event": "stream_done", "data": {}}
 
         with patch("app.roadmap_builder.expand_phase2_node", fake_expand_phase2_node):
@@ -55,6 +55,7 @@ class RoadmapBuilderTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(vector_nodes[0].id, session.nodes[focus.id].child_ids)
         self.assertEqual(vector_nodes[0].node_state, "grayed")
         self.assertGreaterEqual(len(vector_nodes[0].sources), 1)
+        self.assertNotIn("cycle", session.nodes)
 
 
 if __name__ == "__main__":

@@ -35,7 +35,6 @@ async def precompute_phase2_roadmap(session: Session, focus_node_id: str) -> Non
 
         async for event in expand_phase2_node(
             node.label,
-            session.resolution,
             session.known_topics,
             focus.label,
         ):

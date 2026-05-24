@@ -40,7 +40,7 @@ export interface Session {
   id: string
   created_at: string
   phase: Phase
-  resolution: 'intuitive' | 'technical'
+  resolution: 'technical'
   root_topic: string
   selection_history: string[]
   current_phase1_node_id: string | null

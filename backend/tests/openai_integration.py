@@ -21,7 +21,6 @@ class OpenAIIntegrationTests(unittest.TestCase):
                 "vector spaces",
                 "representation learning",
                 "Learned representations often encode examples as vectors.",
-                "intuitive",
             )
         )
 
