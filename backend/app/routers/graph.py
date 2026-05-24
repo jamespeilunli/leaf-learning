@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Iterable
 
 from fastapi import APIRouter, HTTPException
@@ -11,6 +12,7 @@ from pydantic import BaseModel
 from app.ai import expand_phase2_node, explain_prerequisite, suggest_prerequisite
 from app.models import GraphEdge, GraphNode, Resource, Session
 from app.phase2_prefetch import (
+    adopt_prefetched_children_by_label,
     phase2_max_depth,
     prefetch_phase2_tree,
     reveal_direct_phase2_children,
@@ -19,6 +21,7 @@ from app.storage import load_session, merge_save_session, save_session
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class UpdateNodeStateRequest(BaseModel):
@@ -83,10 +86,19 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
     node.node_state = "expanded"
     node.phase = "2"
     node.is_visible = True
-    merge_save_session(session)
+    session = merge_save_session(session)
+    node = _get_node(session, node_id)
     goal_label = _get_node(session, session.focus_node_id).label
 
     async def event_stream() -> Iterable[str]:
+        nonlocal session, node
+        session = merge_save_session(session)
+        node = _get_node(session, node_id)
+
+        if not node.child_ids and adopt_prefetched_children_by_label(session, node):
+            session = merge_save_session(session)
+            node = _get_node(session, node_id)
+
         if node.child_ids:
             revealed_nodes, revealed_edges = reveal_direct_phase2_children(session, node)
             merge_save_session(session)
@@ -130,6 +142,15 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
                 child.phase = "2"
                 child.node_state = "grayed"
                 child.is_visible = True
+                logger.info(
+                    "Generated phase2 node mode=on-demand session_id=%s parent_id=%s parent_label=%r node_id=%s node_label=%r depth=%s",
+                    session.id,
+                    node.id,
+                    node.label,
+                    child.id,
+                    child.label,
+                    child.depth,
+                )
                 session.nodes[child.id] = child
                 if child.id not in node.child_ids:
                     node.child_ids.append(child.id)

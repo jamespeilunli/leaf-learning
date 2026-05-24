@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from fastapi import HTTPException
 
 from app.models import ChatMessage, GraphEdge, GraphNode, Session
+from app.phase2_prefetch import PHASE2_MAX_DEPTH_ENV, phase2_max_depth_from_focus
 from app.storage import list_sessions, load_session, merge_save_session, save_session
 
 from tests.helpers import isolated_sessions_dir
@@ -25,6 +27,13 @@ class ModelAndStorageTests(unittest.TestCase):
         self.assertEqual(session.phase, "1")
         self.assertIn("from", edge.model_dump(by_alias=True))
         self.assertEqual(edge.model_dump(by_alias=True)["to"], "child")
+
+    def test_phase2_max_depth_defaults_to_two_and_can_be_overridden(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(phase2_max_depth_from_focus(), 2)
+
+        with patch.dict("os.environ", {PHASE2_MAX_DEPTH_ENV: "5"}):
+            self.assertEqual(phase2_max_depth_from_focus(), 5)
 
     def test_save_load_and_list_sessions_round_trip_json_files(self) -> None:
         with isolated_sessions_dir() as directory:

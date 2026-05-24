@@ -60,7 +60,19 @@ def merge_save_session(session: Session) -> Session:
     edges_by_id = {edge.id: edge for edge in latest.edges}
     for edge in session.edges:
         edges_by_id[edge.id] = edge
-    merged.edges = list(edges_by_id.values())
+
+    for node_id, node in merged.nodes.items():
+        node.child_ids = [
+            child_id
+            for child_id in node.child_ids
+            if child_id in merged.nodes and merged.nodes[child_id].parent_id == node_id
+        ]
+
+    merged.edges = [
+        edge
+        for edge in edges_by_id.values()
+        if edge.to_id in merged.nodes and merged.nodes[edge.to_id].parent_id == edge.from_id
+    ]
 
     save_session(merged)
     return merged
