@@ -7,6 +7,7 @@ import type { ForceGraphMethods } from 'react-force-graph-2d'
 import { useSessionStore } from '../store/useSessionStore'
 import type { GraphNode } from '../types'
 import { DeepDiveButton } from './DeepDiveButton'
+import { wrapCanvasText } from './phase1CanvasText'
 import { Button, Eyebrow, Panel, StatusNotice } from './ui'
 
 type TopicNode = GraphNode & {
@@ -79,36 +80,6 @@ function roundRect(
   ctx.closePath()
 }
 
-function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines = 3) {
-  const words = text.split(/\s+/)
-  const lines: string[] = []
-  let line = ''
-
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word
-    if (ctx.measureText(candidate).width <= maxWidth) {
-      line = candidate
-      continue
-    }
-
-    if (line) lines.push(line)
-    line = word
-    if (lines.length === maxLines - 1) break
-  }
-
-  if (line && lines.length < maxLines) lines.push(line)
-  if (words.length && lines.length === maxLines) {
-    const last = lines[maxLines - 1]
-    let trimmed = last
-    while (ctx.measureText(`${trimmed}...`).width > maxWidth && trimmed.length > 4) {
-      trimmed = trimmed.slice(0, -1)
-    }
-    lines[maxLines - 1] = `${trimmed}...`
-  }
-
-  return lines
-}
-
 function drawTopicNode(
   node: TopicNode,
   ctx: CanvasRenderingContext2D,
@@ -122,7 +93,8 @@ function drawTopicNode(
   const radius = 8
   const selected = node.id === selectedNodeId
   const fontSize = Math.max(9, 13 / Math.sqrt(globalScale))
-  const labelLines = wrapText(ctx, node.label, width - 38, 3)
+  const labelMaxWidth = width - 38
+  const labelMaxLines = node.isRoot ? 3 : 2
 
   if (node.isNew) {
     ctx.beginPath()
@@ -147,6 +119,8 @@ function drawTopicNode(
   ctx.font = `600 ${fontSize}px Avenir Next, Segoe UI, sans-serif`
   ctx.textAlign = 'left'
   ctx.textBaseline = 'top'
+
+  const labelLines = wrapCanvasText(ctx, node.label, labelMaxWidth, labelMaxLines)
 
   labelLines.forEach((line, index) => {
     ctx.fillText(line, x - width / 2 + 30, y - height / 2 + 12 + index * (fontSize + 3))
