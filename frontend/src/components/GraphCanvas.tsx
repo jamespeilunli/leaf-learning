@@ -17,13 +17,34 @@ import { useSessionStore } from '../store/useSessionStore'
 import type { GraphNode as AppGraphNode } from '../types'
 import { GrayedNode } from './GrayedNode'
 import { Phase2Node } from './Phase2Node'
+import {
+  ROADMAP_LAYOUT_ANIMATION_MS,
+  ROADMAP_LAYOUT_EDGE_CLASS,
+  ROADMAP_LAYOUT_NODE_CLASS,
+  alignNodesToAnchor,
+  nodeCenter,
+  prefersReducedMotion,
+  shouldAnimateLayout,
+} from './phase2LayoutAnimation'
+import type { LayoutAnchor } from './phase2LayoutAnimation'
+import {
+  getRemovedNodeIds,
+  getRoadmapNodeMotion,
+  toNodeMotionSnapshot,
+} from './phase2NodeMotion'
+import type { RoadmapNodeMotion, RoadmapNodeMotionSnapshot } from './phase2NodeMotion'
 import { Button, Eyebrow, StatusNotice } from './ui'
 
 const nodeTypes = { phase2Node: Phase2Node, grayedNode: GrayedNode }
 const ACTIVE_NODE = { width: 320, height: 188 }
 const GRAYED_NODE = { width: 236, height: 132 }
+const EXIT_ANIMATION_MS = 260
 type ElkInstance = InstanceType<typeof ELKConstructor>
-type Point = { x: number; y: number }
+type RoadmapNodeData = {
+  node: AppGraphNode
+  motion: RoadmapNodeMotion
+  motionKey: string
+}
 
 let elkPromise: Promise<ElkInstance> | null = null
 
@@ -36,16 +57,11 @@ function sizeForNode(node: AppGraphNode) {
   return node.node_state === 'grayed' ? GRAYED_NODE : ACTIVE_NODE
 }
 
-function centerForNode(node: RFNode): Point {
-  const roadmapNode = node.data.node as AppGraphNode
-  const size = sizeForNode(roadmapNode)
-  return {
-    x: node.position.x + size.width / 2,
-    y: node.position.y + size.height / 2,
-  }
-}
-
-async function layoutTree(nodes: AppGraphNode[], edges: RFEdge[]): Promise<RFNode[]> {
+async function layoutTree(
+  nodes: AppGraphNode[],
+  edges: RFEdge[],
+  motionByNodeId: Map<string, RoadmapNodeMotion>,
+): Promise<RFNode<RoadmapNodeData>[]> {
   const elk = await getElk()
   const children = nodes.map((node) => {
     const size = sizeForNode(node)
@@ -81,7 +97,54 @@ async function layoutTree(nodes: AppGraphNode[], edges: RFEdge[]): Promise<RFNod
       id: node.id,
       type: node.node_state === 'grayed' ? 'grayedNode' : 'phase2Node',
       position: { x: position?.x ?? 0, y: position?.y ?? 0 },
-      data: { node },
+      data: {
+        node,
+        motion: motionByNodeId.get(node.id) ?? 'idle',
+        motionKey: `${node.id}-${node.node_state}-${motionByNodeId.get(node.id) ?? 'idle'}`,
+      },
+    }
+  })
+}
+
+function decorateEdgesForMotion(
+  edges: RFEdge[],
+  motionByNodeId: Map<string, RoadmapNodeMotion>,
+  isLayoutMoving: boolean,
+): RFEdge[] {
+  const enteringNodeIds = new Set(
+    [...motionByNodeId.entries()]
+      .filter(([, motion]) => motion === 'enter' || motion === 'inactiveEnter')
+      .map(([nodeId]) => nodeId),
+  )
+
+  return edges.map((edge) => {
+    const classNames = [
+      edge.className,
+      isLayoutMoving && ROADMAP_LAYOUT_EDGE_CLASS,
+      (enteringNodeIds.has(edge.source) || enteringNodeIds.has(edge.target)) &&
+        'roadmap-edge--enter',
+    ].filter(Boolean).join(' ')
+
+    return {
+      ...edge,
+      className: classNames || undefined,
+    }
+  })
+}
+
+function decorateNodesForLayoutMotion(
+  nodes: RFNode<RoadmapNodeData>[],
+  previousNodes: RFNode<RoadmapNodeData>[],
+  isLayoutMoving: boolean,
+): RFNode<RoadmapNodeData>[] {
+  if (!isLayoutMoving) return nodes
+
+  const previousIds = new Set(previousNodes.map((node) => node.id))
+  return nodes.map((node) => {
+    if (!previousIds.has(node.id)) return node
+    return {
+      ...node,
+      className: [node.className, ROADMAP_LAYOUT_NODE_CLASS].filter(Boolean).join(' '),
     }
   })
 }
@@ -93,8 +156,11 @@ export function GraphCanvas() {
   const reactFlow = useReactFlow()
   const paneRef = useRef<HTMLDivElement | null>(null)
   const didInitialFit = useRef(false)
-  const rootAnchorRef = useRef<Point | null>(null)
-  const [rfNodes, setRfNodes] = useState<RFNode[]>([])
+  const layoutAnchorRef = useRef<LayoutAnchor | null>(null)
+  const rfNodesRef = useRef<RFNode<RoadmapNodeData>[]>([])
+  const nodeSnapshotRef = useRef<Map<string, RoadmapNodeMotionSnapshot> | null>(null)
+  const [rfNodes, setRfNodes] = useState<RFNode<RoadmapNodeData>[]>([])
+  const [rfEdges, setRfEdges] = useState<RFEdge[]>([])
 
   const graphNodes = useMemo(() => {
     if (!session) return []
@@ -103,7 +169,7 @@ export function GraphCanvas() {
     )
   }, [session])
 
-  const rfEdges = useMemo<RFEdge[]>(() => {
+  const baseRfEdges = useMemo<RFEdge[]>(() => {
     if (!session) return []
     return session.edges
       .filter((edge) => session.nodes[edge.from]?.is_visible && session.nodes[edge.to]?.is_visible)
@@ -118,14 +184,121 @@ export function GraphCanvas() {
   }, [session])
 
   useEffect(() => {
+    rfNodesRef.current = rfNodes
+  }, [rfNodes])
+
+  useEffect(() => {
     let cancelled = false
-    void layoutTree(graphNodes, rfEdges).then((layouted) => {
-      if (!cancelled) setRfNodes(layouted)
+    let exitTimer: number | null = null
+    let layoutTimer: number | null = null
+    const previousSnapshot = nodeSnapshotRef.current ?? new Map<string, RoadmapNodeMotionSnapshot>()
+    const hasPreviousSnapshot = nodeSnapshotRef.current !== null
+    const currentSnapshot = toNodeMotionSnapshot(graphNodes)
+    const removedNodeIds = hasPreviousSnapshot ? getRemovedNodeIds(previousSnapshot, graphNodes) : []
+    const motionByNodeId = getRoadmapNodeMotion(previousSnapshot, graphNodes, hasPreviousSnapshot)
+    const previousRfNodes = rfNodesRef.current
+    const focusNodeId = session?.focus_node_id ?? null
+    const isLayoutMoving = shouldAnimateLayout(
+      hasPreviousSnapshot && previousRfNodes.length > 0,
+      prefersReducedMotion(),
+    )
+    const nextRfEdges = decorateEdgesForMotion(baseRfEdges, motionByNodeId, isLayoutMoving)
+
+    nodeSnapshotRef.current = currentSnapshot
+
+    void layoutTree(graphNodes, baseRfEdges, motionByNodeId).then((layouted) => {
+      if (cancelled) return
+
+      let anchoredLayouted = layouted
+      const focusLayoutNode = focusNodeId
+        ? layouted.find((node) => node.id === focusNodeId)
+        : null
+
+      if (focusLayoutNode && focusNodeId) {
+        const nextFocusCenter = nodeCenter(
+          focusLayoutNode.position,
+          sizeForNode(focusLayoutNode.data.node),
+        )
+        const previousAnchor = layoutAnchorRef.current
+
+        if (previousAnchor?.nodeId === focusNodeId) {
+          anchoredLayouted = alignNodesToAnchor(
+            layouted,
+            nextFocusCenter,
+            previousAnchor.center,
+          )
+        } else {
+          layoutAnchorRef.current = {
+            nodeId: focusNodeId,
+            center: nextFocusCenter,
+          }
+        }
+      } else {
+        layoutAnchorRef.current = null
+      }
+
+      const exitingNodes = removedNodeIds.flatMap((nodeId) => {
+        const previousNode = previousRfNodes.find((node) => node.id === nodeId)
+        if (!previousNode) return []
+
+        const previousData = previousNode.data
+        return [
+          {
+            ...previousNode,
+            data: {
+              ...previousData,
+              motion: 'exit' as const,
+              motionKey: `${nodeId}-exit`,
+            },
+          },
+        ]
+      })
+
+      const movingNodes = decorateNodesForLayoutMotion(anchoredLayouted, previousRfNodes, isLayoutMoving)
+      const targetNodes = [...movingNodes, ...exitingNodes]
+      setRfEdges(nextRfEdges)
+      setRfNodes(targetNodes)
+
+      if (isLayoutMoving) {
+        layoutTimer = window.setTimeout(() => {
+          setRfNodes((current) =>
+            current.map((node) => ({
+              ...node,
+              className: node.className
+                ?.split(/\s+/)
+                .filter((className) => className && className !== ROADMAP_LAYOUT_NODE_CLASS)
+                .join(' ') || undefined,
+            })),
+          )
+          setRfEdges((current) =>
+            current.map((edge) => ({
+              ...edge,
+              className: edge.className
+                ?.split(/\s+/)
+                .filter((className) => className && className !== ROADMAP_LAYOUT_EDGE_CLASS)
+                .join(' ') || undefined,
+            })),
+          )
+        }, ROADMAP_LAYOUT_ANIMATION_MS)
+      }
+
+      if (exitingNodes.length) {
+        const exitingNodeIds = new Set(exitingNodes.map((node) => node.id))
+        exitTimer = window.setTimeout(() => {
+          setRfNodes((current) => current.filter((node) => !exitingNodeIds.has(node.id)))
+        }, EXIT_ANIMATION_MS)
+      }
     })
     return () => {
       cancelled = true
+      if (layoutTimer !== null) {
+        window.clearTimeout(layoutTimer)
+      }
+      if (exitTimer !== null) {
+        window.clearTimeout(exitTimer)
+      }
     }
-  }, [graphNodes, rfEdges])
+  }, [graphNodes, baseRfEdges, session?.focus_node_id])
 
   useEffect(() => {
     if (didInitialFit.current || !rfNodes.length) return
@@ -136,31 +309,6 @@ export function GraphCanvas() {
     reactFlow.setViewport(viewport)
     didInitialFit.current = true
   }, [reactFlow, rfNodes])
-
-  useEffect(() => {
-    if (!session?.focus_node_id || !rfNodes.length) return
-
-    const rootNode = rfNodes.find((node) => node.id === session.focus_node_id)
-    if (!rootNode) return
-
-    const nextRootCenter = centerForNode(rootNode)
-    const previousRootCenter = rootAnchorRef.current
-    rootAnchorRef.current = nextRootCenter
-
-    if (!didInitialFit.current || !previousRootCenter) return
-
-    const viewport = reactFlow.getViewport()
-    const deltaX = previousRootCenter.x - nextRootCenter.x
-    const deltaY = previousRootCenter.y - nextRootCenter.y
-
-    if (Math.abs(deltaX) < 0.5 && Math.abs(deltaY) < 0.5) return
-
-    reactFlow.setViewport({
-      ...viewport,
-      x: viewport.x + deltaX * viewport.zoom,
-      y: viewport.y + deltaY * viewport.zoom,
-    })
-  }, [reactFlow, rfNodes, session?.focus_node_id])
 
   if (!session) return null
   const focusNode = session.focus_node_id ? session.nodes[session.focus_node_id] : null

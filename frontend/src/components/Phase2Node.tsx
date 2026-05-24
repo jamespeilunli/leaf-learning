@@ -6,9 +6,17 @@ import { useSessionStore } from '../store/useSessionStore'
 import type { GraphNode } from '../types'
 import { cn } from '../lib/cn'
 import { SkeletonLines } from './ui'
+import type { RoadmapNodeMotion } from './phase2NodeMotion'
 
-export function Phase2Node({ data }: NodeProps<{ node: GraphNode }>) {
+type Phase2NodeData = {
+  node: GraphNode
+  motion?: RoadmapNodeMotion
+  motionKey?: string
+}
+
+export function Phase2Node({ data }: NodeProps<Phase2NodeData>) {
   const { node } = data
+  const motion = data.motion ?? 'idle'
   const streamingNodeIds = useSessionStore((state) => state.streamingNodeIds)
   const openNodeDetails = useSessionStore((state) => state.openNodeDetails)
   const isStreaming = streamingNodeIds.has(node.id)
@@ -19,14 +27,21 @@ export function Phase2Node({ data }: NodeProps<{ node: GraphNode }>) {
 
   return (
     <button
-      className={[
+      className={cn(
         'group relative h-[188px] w-[320px] overflow-hidden rounded-[var(--radius-sm)] border p-4 text-left shadow-[0_18px_42px_rgba(15,23,42,0.14)] transition duration-200',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2',
         'before:absolute before:inset-x-4 before:top-0 before:h-[3px] before:rounded-b-full before:content-[""]',
+        'roadmap-node',
         isLearned
           ? 'border-[var(--success)]/35 bg-[linear-gradient(180deg,#f5fff9_0%,#e2f4e9_100%)] before:bg-[var(--success)] hover:border-[var(--success)]'
           : 'border-[var(--ink-soft)] bg-[linear-gradient(180deg,#fffdf7_0%,#edf1ec_100%)] before:bg-[var(--accent)] hover:border-[var(--accent)] hover:shadow-[0_22px_52px_rgba(23,33,23,0.18)]',
-      ].join(' ')}
+        motion === 'enter' && 'roadmap-node--enter',
+        motion === 'exit' && 'roadmap-node--exit pointer-events-none',
+        motion === 'learned' && 'roadmap-node--learned',
+      )}
+      data-motion={motion}
+      data-motion-key={data.motionKey}
+      disabled={motion === 'exit'}
       type="button"
       onClick={() => openNodeDetails(node.id)}
     >
@@ -41,7 +56,12 @@ export function Phase2Node({ data }: NodeProps<{ node: GraphNode }>) {
         {isStreaming ? (
           <Loader2 className="mt-1 h-5 w-5 shrink-0 animate-spin text-[var(--accent)]" />
         ) : isLearned ? (
-          <CheckCircle2 className="mt-1 h-5 w-5 shrink-0 text-emerald-600" />
+          <CheckCircle2
+            className={cn(
+              'mt-1 h-5 w-5 shrink-0 text-emerald-600',
+              motion === 'learned' && 'roadmap-node__learned-icon',
+            )}
+          />
         ) : (
           <BookOpen className="mt-1 h-5 w-5 shrink-0 text-[var(--accent)]" />
         )}
