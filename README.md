@@ -1,33 +1,21 @@
-# FastAPI + OpenAI + React Starter
+# Leaf Learning
 
-This repo is split into:
+Leaf Learning is an AI-powered exploration tool built for the 2026 ALPHAG3N Human-centered AI Hackathon hosted at Stanford University. It helps learners turn a vague curiosity into a concrete learning path by combining interactive knowledge graphs with personalized prerequisite trees.
 
-- `backend/`: FastAPI server that calls the OpenAI Responses API.
-- `frontend/`: Vite React TypeScript app styled with Tailwind CSS.
+## Overview
 
-## Backend
+People often want to learn something new but do not yet know the shape of the field, what related ideas exist, or which fundamentals they need first. Leaf Learning addresses that gap by acting as a learner-directed guide from initial curiosity to actionable next steps.
 
-The backend defaults to a deterministic mock AI mode, so local development and
-deep-dive testing work without OpenAI access even if an API key is present.
+The experience has two phases:
 
-```bash
-cd backend
-uv sync
-ALPHAG3N_USE_OPENAI=false uv run uvicorn app.main:app --reload --port 8000
-```
+- **Phase 1: Concept Exploration** - Starting from a broad prompt, Leaf generates an interactive concept map of related ideas, disciplines, and connections. Learners can expand nodes, explore adjacent topics, and narrow in on an area they want to understand more deeply.
+- **Phase 2: Learning Path Building** - Once a learner chooses a topic, Leaf generates a prerequisite tree with foundational concepts, skills, and resources. Learners can prune, edit, expand, and personalize the tree based on what they already know and what they still need to learn.
 
-To enable the real OpenAI backend, set both values:
+## Human-Centered AI
 
-```bash
-ALPHAG3N_USE_OPENAI=true OPENAI_API_KEY=sk-your-real-key uv run uvicorn app.main:app --reload --port 8000
-```
+Leaf uses AI to support open-ended exploration across an unbounded space of learner interests, but keeps the learner in control. Users decide what to explore, what to ignore, how deep to go, and which resources to follow. The goal is not to replace curiosity with automation, but to help learners navigate unknown unknowns and start learning with more confidence.
 
-## Frontend
+## Repository Structure
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open `http://localhost:5173`. The Vite dev server proxies `/api/*` to FastAPI on `http://localhost:8000`.
+- `frontend/` - React and TypeScript interface for the graph-based learning experience.
+- `backend/` - FastAPI backend with AI generation, session handling, graph data, and resource validation.
