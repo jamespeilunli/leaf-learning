@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { streamSSE } from './useSSE'
 
@@ -21,6 +21,15 @@ function streamFromText(text: string): ReadableStream<Uint8Array> {
 }
 
 describe('streamSSE', () => {
+  beforeEach(() => {
+    vi.stubEnv('VITE_BACKEND_URL', '')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
   it('posts JSON and parses event/data pairs', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -39,6 +48,23 @@ describe('streamSSE', () => {
       { event: 'token', data: { text: 'hello' } },
       { event: 'stream_done', data: {} },
     ])
+  })
+
+  it('posts to the configured backend URL when set', async () => {
+    vi.stubEnv('VITE_BACKEND_URL', 'https://backend.example.com/')
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: streamFromText('event: stream_done\ndata: {}\n\n'),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await collect(streamSSE('/api/chat', { message: 'hi' }))
+
+    expect(fetchMock).toHaveBeenCalledWith('https://backend.example.com/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'hi' }),
+    })
   })
 
   it('throws on non-ok responses and unavailable bodies', async () => {

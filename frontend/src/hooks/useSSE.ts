@@ -1,8 +1,10 @@
+import { buildApiUrl } from '../lib/apiConfig'
+
 export async function* streamSSE(
   url: string,
   body: object,
 ): AsyncGenerator<{ event: string; data: unknown }> {
-  const response = await fetch(url, {
+  const response = await fetch(buildApiUrl(url), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

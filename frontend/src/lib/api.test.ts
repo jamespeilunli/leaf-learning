@@ -2,6 +2,7 @@ import axios from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from './api'
+import { getApiBaseUrl } from './apiConfig'
 import { makeSession } from '../test/fixtures'
 
 const mocks = vi.hoisted(() => ({
@@ -31,7 +32,7 @@ describe('api client', () => {
   })
 
   it('maps session endpoints to the backend contract', async () => {
-    expect(axios.create).toHaveBeenCalledWith({ baseURL: '/api' })
+    expect(axios.create).toHaveBeenCalledWith({ baseURL: getApiBaseUrl() })
     const session = makeSession()
     mocks.post.mockResolvedValueOnce({ data: { session_id: 'session-1', session } })
     mocks.get.mockResolvedValueOnce({ data: session })

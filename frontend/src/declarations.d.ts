@@ -1,5 +1,13 @@
 declare module 'dagre'
 
+interface ImportMetaEnv {
+  readonly VITE_BACKEND_URL?: string
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}
+
 declare module 'react-force-graph-2d' {
   import type { ForwardRefExoticComponent, RefAttributes } from 'react'
 

@@ -1,9 +1,10 @@
 import axios from 'axios'
 
 import type { GraphEdge, GraphNode, Phase, Session } from '../types'
+import { getApiBaseUrl } from './apiConfig'
 
 const http = axios.create({
-  baseURL: '/api',
+  baseURL: getApiBaseUrl(),
 })
 
 export async function createSession(

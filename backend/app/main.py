@@ -41,10 +41,12 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://alphag3n-hackathon-2026-u87w.onrender.com/",
     ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 @app.get("/health")
 def health() -> dict[str, str]:
