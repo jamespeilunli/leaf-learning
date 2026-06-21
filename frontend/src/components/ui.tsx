@@ -162,6 +162,25 @@ export function TextArea({ className, invalid = false, ...props }: TextAreaProps
   )
 }
 
+interface TextInputProps extends ComponentPropsWithoutRef<'input'> {
+  invalid?: boolean
+}
+
+export function TextInput({ className, invalid = false, ...props }: TextInputProps) {
+  return (
+    <input
+      aria-invalid={invalid || undefined}
+      className={cn(
+        'h-11 w-full rounded-[var(--radius-md)] border bg-white/90 px-4 text-sm text-[var(--ink)] shadow-inner outline-none transition',
+        'placeholder:text-[var(--muted)]/80 focus:border-[var(--accent)] focus:bg-white focus:ring-2 focus:ring-[rgba(73,110,81,0.18)]',
+        invalid ? 'border-[var(--danger)]' : 'border-[var(--line)]',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
 interface StatusNoticeProps extends ComponentPropsWithoutRef<'div'> {
   tone?: 'info' | 'error' | 'success' | 'loading'
 }

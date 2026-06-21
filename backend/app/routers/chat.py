@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.ai import chat_with_node
 from app.models import ChatMessage, GraphNode, Session
+from app.openai_key import request_openai_api_key, require_openai_api_key
 from app.storage import load_session, save_session
 
 
@@ -42,7 +43,13 @@ def _goal_path(session: Session, node: GraphNode) -> list[str]:
 
 
 @router.post("/session/{session_id}/node/{node_id}/chat")
-async def chat(session_id: str, node_id: str, payload: ChatRequest) -> StreamingResponse:
+async def chat(
+    session_id: str,
+    node_id: str,
+    payload: ChatRequest,
+    openai_api_key: str | None = Depends(request_openai_api_key),
+) -> StreamingResponse:
+    openai_api_key = require_openai_api_key(openai_api_key)
     session = load_session(session_id)
     node = _get_node(session, node_id)
     if node.node_state not in {"expanded", "learned"}:
@@ -61,6 +68,7 @@ async def chat(session_id: str, node_id: str, payload: ChatRequest) -> Streaming
                 goal_path,
                 node.chat_history[-20:],
                 payload.message,
+                openai_api_key=openai_api_key,
             ):
                 full_response += chunk
                 yield _sse("token", {"text": chunk})

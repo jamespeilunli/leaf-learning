@@ -1,4 +1,5 @@
 import { buildApiUrl } from '../lib/apiConfig'
+import { getOpenAiApiKeyHeaders } from '../lib/openAiApiKey'
 
 export async function* streamSSE(
   url: string,
@@ -6,7 +7,7 @@ export async function* streamSSE(
 ): AsyncGenerator<{ event: string; data: unknown }> {
   const response = await fetch(buildApiUrl(url), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getOpenAiApiKeyHeaders() },
     body: JSON.stringify(body),
   })
 

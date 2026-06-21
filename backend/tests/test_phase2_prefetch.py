@@ -22,6 +22,7 @@ async def fake_expand_phase2_node(
     known_topics: list[str],
     goal_label: str,
     context_path: list[str] | None = None,
+    openai_api_key: str | None = None,
 ) -> AsyncIterator[dict]:
     resource = Resource(
         url=f"https://example.com/{node_label.lower().replace(' ', '-')}",
@@ -87,8 +88,8 @@ class Phase2PrefetchTests(unittest.TestCase):
         self.assertEqual(child.depth, 3)
         self.assertEqual(child.child_ids, [])
 
-    def test_prefetch_passes_root_to_node_context_path(self) -> None:
-        calls: list[tuple[str, list[str] | None]] = []
+    def test_prefetch_passes_root_to_node_context_path_and_openai_key(self) -> None:
+        calls: list[tuple[str, list[str] | None, str | None]] = []
         focus = GraphNode(label="Goal", phase="2", node_state="expanded", depth=0)
         branch = GraphNode(
             label="Selected Branch",
@@ -110,15 +111,24 @@ class Phase2PrefetchTests(unittest.TestCase):
             known_topics: list[str],
             goal_label: str,
             context_path: list[str] | None = None,
+            openai_api_key: str | None = None,
         ) -> AsyncIterator[dict]:
-            calls.append((node_label, context_path))
+            calls.append((node_label, context_path, openai_api_key))
             for event in ():
                 yield event
 
         with patch("app.phase2_prefetch.expand_phase2_node", side_effect=recording_expand_phase2_node):
-            collect(prefetch_phase2_tree(session, branch, focus.label, max_layers_from_start=0))
+            collect(
+                prefetch_phase2_tree(
+                    session,
+                    branch,
+                    focus.label,
+                    max_layers_from_start=0,
+                    openai_api_key="sk-user-key",
+                )
+            )
 
-        self.assertEqual(calls, [("Selected Branch", ["Goal", "Selected Branch"])])
+        self.assertEqual(calls, [("Selected Branch", ["Goal", "Selected Branch"], "sk-user-key")])
 
     def test_prefetch_stops_at_absolute_depth_limit(self) -> None:
         focus = GraphNode(label="Goal", phase="2", node_state="expanded", depth=0)

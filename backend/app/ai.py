@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import logging
 from collections.abc import AsyncGenerator
 from typing import TypeVar
@@ -10,13 +9,12 @@ from pydantic import BaseModel, Field
 
 from app import mock_ai
 from app.models import ChatMessage, GraphEdge, GraphNode, Resource
+from app.openai_key import API_KEY_PLACEHOLDER, using_mock_ai
 from app.resource_validation import endpoint_validation_result
 
 
 MODEL = "gpt-5.4-mini"
-API_KEY_PLACEHOLDER = "sk-your-key-here"
 logger = logging.getLogger(__name__)
-_client: AsyncOpenAI | None = None
 ParsedResponseT = TypeVar("ParsedResponseT", bound=BaseModel)
 
 
@@ -143,6 +141,7 @@ async def _replacement_phase2_source(
     goal_label: str,
     rejected_source: Resource,
     rejected_urls: list[str],
+    openai_api_key: str | None = None,
 ) -> Resource:
     instructions = f"""
 You generated a source URL for a learning roadmap node, but the app checked the URL
@@ -156,7 +155,7 @@ The source must explain "{node_label}" in technical depth, but should not be an 
 The description must be exactly 1 sentence on what the resource covers and why it's useful.
 """.strip()
 
-    response = await get_client().responses.parse(
+    response = await get_client(openai_api_key).responses.parse(
         model=MODEL,
         instructions=instructions,
         input=(
@@ -176,6 +175,7 @@ async def _valid_or_replacement_phase2_source(
     goal_label: str,
     accepted_urls: set[str],
     replacement_attempts: int = 2,
+    openai_api_key: str | None = None,
 ) -> Resource | None:
     rejected_urls: list[str] = []
     candidate = source
@@ -209,6 +209,7 @@ async def _valid_or_replacement_phase2_source(
             goal_label=goal_label,
             rejected_source=candidate,
             rejected_urls=rejected_urls,
+            openai_api_key=openai_api_key,
         )
 
     return None
@@ -257,6 +258,7 @@ async def _replacement_phase2_sources(
     node_label: str,
     goal_label: str,
     accepted_urls: set[str],
+    openai_api_key: str | None = None,
 ) -> list[Resource]:
     replacements: list[Resource] = []
 
@@ -266,12 +268,14 @@ async def _replacement_phase2_sources(
             goal_label=goal_label,
             rejected_source=source,
             rejected_urls=[source.url],
+            openai_api_key=openai_api_key,
         )
         replacement = await _valid_or_replacement_phase2_source(
             source=replacement_candidate,
             node_label=node_label,
             goal_label=goal_label,
             accepted_urls=accepted_urls,
+            openai_api_key=openai_api_key,
         )
         if replacement is None:
             continue
@@ -281,28 +285,11 @@ async def _replacement_phase2_sources(
     return replacements
 
 
-def _env_flag(name: str, default: bool = False) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def using_mock_ai() -> bool:
-    return not _env_flag("ALPHAG3N_USE_OPENAI", default=False)
-
-
-def get_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        api_key = os.getenv("OPENAI_API_KEY", "").strip()
-        if not api_key or api_key == API_KEY_PLACEHOLDER:
-            raise RuntimeError(
-                "OpenAI usage is enabled, but OPENAI_API_KEY is missing or still set "
-                "to the placeholder value."
-            )
-        _client = AsyncOpenAI()
-    return _client
+def get_client(openai_api_key: str | None = None) -> AsyncOpenAI:
+    api_key = (openai_api_key or "").strip()
+    if not api_key or api_key == API_KEY_PLACEHOLDER:
+        raise RuntimeError("OpenAI API key is required when OpenAI mode is enabled.")
+    return AsyncOpenAI(api_key=api_key)
 
 
 def _extract_response_text(response: object) -> str:
@@ -333,7 +320,9 @@ def _require_output_parsed(response: object, expected_type: type[ParsedResponseT
 
 
 async def generate_phase1_children(
-    current_label: str, ancestor_labels: list[str]
+    current_label: str,
+    ancestor_labels: list[str],
+    openai_api_key: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     if using_mock_ai():
         async for event in mock_ai.generate_phase1_children(current_label, ancestor_labels):
@@ -352,7 +341,7 @@ Each why_interesting value must be exactly 1 sentence on why someone learning wo
 
     try:
         node_stream = _JsonArrayItemStream("nodes", Phase1Child)
-        async with get_client().responses.stream(
+        async with get_client(openai_api_key).responses.stream(
             model=MODEL,
             instructions=instructions,
             input=f"Generate subtopics for {current_label}.",
@@ -394,6 +383,7 @@ async def expand_phase2_node(
     known_topics: list[str],
     goal_label: str,
     context_path: list[str] | None = None,
+    openai_api_key: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     if not context_path:
         context_path = [goal_label] if goal_label == node_label else [goal_label, node_label]
@@ -434,7 +424,7 @@ Do NOT include any of these topics as prerequisites, the user already knows them
         accepted_sources: list[Resource] = []
         accepted_source_urls: set[str] = set()
         pending_rejected_sources: list[Resource] = []
-        async with get_client().responses.stream(
+        async with get_client(openai_api_key).responses.stream(
             model=MODEL,
             instructions=instructions,
             input=f"Expand the learning node for {node_label}.",
@@ -501,6 +491,7 @@ Do NOT include any of these topics as prerequisites, the user already knows them
                 node_label=node_label,
                 goal_label=goal_label,
                 accepted_urls=accepted_source_urls,
+                openai_api_key=openai_api_key,
             )
             if replacements:
                 accepted_sources.extend(replacements)
@@ -528,7 +519,10 @@ Do NOT include any of these topics as prerequisites, the user already knows them
 
 
 async def explain_prerequisite(
-    node_label: str, parent_label: str, parent_description: str
+    node_label: str,
+    parent_label: str,
+    parent_description: str,
+    openai_api_key: str | None = None,
 ) -> str:
     if using_mock_ai():
         return await mock_ai.explain_prerequisite(
@@ -547,7 +541,7 @@ Explain what "{node_label}" is and why it appears as a prerequisite for understa
 Write 3 to 5 sentences. Do not assume they know the term — explain it plainly.
 """.strip()
 
-    response = await get_client().responses.create(
+    response = await get_client(openai_api_key).responses.create(
         model=MODEL,
         instructions=instructions,
         input=f"Explain the prerequisite {node_label}.",
@@ -559,6 +553,7 @@ async def suggest_prerequisite(
     user_message: str,
     parent_label: str,
     parent_description: str,
+    openai_api_key: str | None = None,
 ) -> dict[str, str]:
     if using_mock_ai():
         return await mock_ai.suggest_prerequisite(user_message, parent_label, parent_description)
@@ -572,7 +567,7 @@ The label should be a short technical concept name.
 The description should be 1 sentence explaining what it is and why it supports the parent topic.
 """.strip()
 
-    response = await get_client().responses.parse(
+    response = await get_client(openai_api_key).responses.parse(
         model=MODEL,
         instructions=instructions,
         input=user_message,
@@ -592,6 +587,7 @@ async def chat_with_node(
     goal_path: list[str],
     history: list[ChatMessage],
     user_message: str,
+    openai_api_key: str | None = None,
 ) -> AsyncGenerator[str, None]:
     if using_mock_ai():
         async for chunk in mock_ai.chat_with_node(
@@ -621,7 +617,7 @@ Be concise. Stay on topic.
     messages = [{"role": message.role, "content": message.content} for message in truncated_history]
     messages.append({"role": "user", "content": user_message})
 
-    stream = await get_client().responses.create(
+    stream = await get_client(openai_api_key).responses.create(
         model=MODEL,
         instructions=instructions,
         input=messages,

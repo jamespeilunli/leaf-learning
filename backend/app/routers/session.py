@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.ai import generate_phase1_children
 from app.models import GraphNode, Session
+from app.openai_key import request_openai_api_key, require_openai_api_key
 from app.storage import delete_all_sessions, list_sessions, load_session, save_session
 
 
@@ -40,7 +41,11 @@ def _ancestor_labels(session: Session, node: GraphNode) -> list[str]:
 
 
 @router.post("/session")
-async def create_session(payload: CreateSessionRequest) -> dict:
+async def create_session(
+    payload: CreateSessionRequest,
+    openai_api_key: str | None = Depends(request_openai_api_key),
+) -> dict:
+    openai_api_key = require_openai_api_key(openai_api_key)
     topic = payload.topic.strip()
     root_node = GraphNode(
         label=topic,
@@ -56,7 +61,7 @@ async def create_session(payload: CreateSessionRequest) -> dict:
     )
     save_session(session)
 
-    async for event in generate_phase1_children(topic, []):
+    async for event in generate_phase1_children(topic, [], openai_api_key=openai_api_key):
         if event["event"] == "node_added":
             child = GraphNode.model_validate(event["data"])
             child.parent_id = root_node.id
@@ -86,7 +91,11 @@ def clear_sessions() -> dict:
 
 
 @router.post("/session/{session_id}/select-topic")
-async def select_topic(session_id: str, payload: SelectTopicRequest) -> dict:
+async def select_topic(
+    session_id: str,
+    payload: SelectTopicRequest,
+    openai_api_key: str | None = Depends(request_openai_api_key),
+) -> dict:
     session = load_session(session_id)
     current_id = session.current_phase1_node_id
     if current_id is None:
@@ -100,7 +109,12 @@ async def select_topic(session_id: str, payload: SelectTopicRequest) -> dict:
         save_session(session)
         return session.model_dump(by_alias=True)
 
-    async for event in generate_phase1_children(selected.label, _ancestor_labels(session, selected)):
+    openai_api_key = require_openai_api_key(openai_api_key)
+    async for event in generate_phase1_children(
+        selected.label,
+        _ancestor_labels(session, selected),
+        openai_api_key=openai_api_key,
+    ):
         if event["event"] == "node_added":
             child = GraphNode.model_validate(event["data"])
             child.parent_id = payload.node_id
@@ -115,7 +129,11 @@ async def select_topic(session_id: str, payload: SelectTopicRequest) -> dict:
 
 
 @router.post("/session/{session_id}/phase1-expand")
-async def expand_phase1_topic(session_id: str, payload: SelectTopicRequest) -> dict:
+async def expand_phase1_topic(
+    session_id: str,
+    payload: SelectTopicRequest,
+    openai_api_key: str | None = Depends(request_openai_api_key),
+) -> dict:
     session = load_session(session_id)
     selected = _get_node(session, payload.node_id)
 
@@ -126,7 +144,12 @@ async def expand_phase1_topic(session_id: str, payload: SelectTopicRequest) -> d
         save_session(session)
         return session.model_dump(by_alias=True)
 
-    async for event in generate_phase1_children(selected.label, _ancestor_labels(session, selected)):
+    openai_api_key = require_openai_api_key(openai_api_key)
+    async for event in generate_phase1_children(
+        selected.label,
+        _ancestor_labels(session, selected),
+        openai_api_key=openai_api_key,
+    ):
         if event["event"] == "node_added":
             child = GraphNode.model_validate(event["data"])
             child.parent_id = payload.node_id

@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { ArrowRight, Clock3, Leaf, Loader2, RotateCcw } from 'lucide-react'
+import { ArrowRight, Clock3, KeyRound, Leaf, Loader2, RotateCcw, Save } from 'lucide-react'
 
 import { listSessions } from '../lib/api'
+import { getOpenAiApiKey, saveOpenAiApiKey } from '../lib/openAiApiKey'
 import { useSessionStore } from '../store/useSessionStore'
 import type { Phase } from '../types'
 import { LaunchGraphBackground } from './LaunchGraphBackground'
-import { Button, Eyebrow, Panel, StatusNotice, TextArea } from './ui'
+import { Button, Eyebrow, Panel, StatusNotice, TextArea, TextInput } from './ui'
 
 type SessionRow = { id: string; root_topic: string; created_at: string; phase: Phase }
 
@@ -20,6 +21,10 @@ export function StartScreen() {
   const [sessions, setSessions] = useState<SessionRow[]>([])
   const [isLoadingSessions, setIsLoadingSessions] = useState(true)
   const [sessionListError, setSessionListError] = useState(false)
+  const [apiKey, setApiKey] = useState(() => getOpenAiApiKey())
+  const [apiKeyStatus, setApiKeyStatus] = useState<'empty' | 'dirty' | 'saved'>(
+    () => (getOpenAiApiKey() ? 'saved' : 'empty'),
+  )
 
   useEffect(() => {
     let active = true
@@ -46,7 +51,16 @@ export function StartScreen() {
     event.preventDefault()
     const trimmed = topic.trim()
     if (!trimmed || isLoading) return
+    const saved = saveOpenAiApiKey(apiKey)
+    setApiKey(saved)
+    setApiKeyStatus(saved ? 'saved' : 'empty')
     await initSession(trimmed)
+  }
+
+  function handleSaveApiKey() {
+    const saved = saveOpenAiApiKey(apiKey)
+    setApiKey(saved)
+    setApiKeyStatus(saved ? 'saved' : 'empty')
   }
 
   return (
@@ -85,6 +99,8 @@ export function StartScreen() {
                   if (cleared) {
                     setSessions([])
                     setSessionListError(false)
+                    setApiKey('')
+                    setApiKeyStatus('empty')
                   }
                 })
               }}
@@ -140,6 +156,46 @@ export function StartScreen() {
                 onChange={(event) => setTopic(event.target.value)}
                 placeholder="Name the topic, angle, or outcome you want to understand."
               />
+
+              <div className="grid gap-3 rounded-[var(--radius-sm)] border border-white/70 bg-[var(--panel)]/72 p-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                <div>
+                  <label
+                    className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--leaf-deep)]"
+                    htmlFor="openai-api-key"
+                  >
+                    <KeyRound aria-hidden="true" className="h-4 w-4" />
+                    OpenAI API key
+                  </label>
+                  <TextInput
+                    id="openai-api-key"
+                    autoComplete="off"
+                    className="mt-2 border-white/80 bg-white/90"
+                    placeholder="sk-..."
+                    type="password"
+                    value={apiKey}
+                    onChange={(event) => {
+                      setApiKey(event.target.value)
+                      setApiKeyStatus(event.target.value.trim() ? 'dirty' : 'empty')
+                    }}
+                  />
+                </div>
+                <Button
+                  className="justify-self-start sm:justify-self-auto"
+                  leftIcon={<Save aria-hidden="true" className="h-4 w-4" />}
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleSaveApiKey}
+                >
+                  Save key
+                </Button>
+                <div className="text-xs font-semibold text-[var(--muted)] sm:col-span-2">
+                  {apiKeyStatus === 'saved'
+                    ? 'Saved locally'
+                    : apiKeyStatus === 'dirty'
+                      ? 'Unsaved changes'
+                      : 'No key saved'}
+                </div>
+              </div>
 
               {error ? <StatusNotice tone="error">{error}</StatusNotice> : null}
             </Panel>

@@ -5,12 +5,13 @@ import json
 import logging
 from collections.abc import Iterable
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.ai import expand_phase2_node, explain_prerequisite, suggest_prerequisite
 from app.models import GraphEdge, GraphNode, Resource, Session
+from app.openai_key import request_openai_api_key, require_openai_api_key
 from app.phase2_prefetch import (
     PHASE2_INCREMENTAL_PREFETCH_LAYERS,
     adopt_prefetched_children_by_label,
@@ -65,7 +66,12 @@ def _collect_descendants(session: Session, node_id: str) -> set[str]:
     return collected
 
 
-async def _prefetch_descendants(session_id: str, start_node_ids: list[str], goal_label: str) -> None:
+async def _prefetch_descendants(
+    session_id: str,
+    start_node_ids: list[str],
+    goal_label: str,
+    openai_api_key: str | None = None,
+) -> None:
     try:
         session = load_session(session_id)
         for start_node_id in start_node_ids:
@@ -78,6 +84,7 @@ async def _prefetch_descendants(session_id: str, start_node_ids: list[str], goal
                 goal_label,
                 on_progress=merge_save_session,
                 max_layers_from_start=PHASE2_INCREMENTAL_PREFETCH_LAYERS,
+                openai_api_key=openai_api_key,
             )
         merge_save_session(session)
     except Exception:
@@ -85,7 +92,12 @@ async def _prefetch_descendants(session_id: str, start_node_ids: list[str], goal
 
 
 @router.post("/session/{session_id}/node/{node_id}/expand")
-async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
+async def expand_node(
+    session_id: str,
+    node_id: str,
+    openai_api_key: str | None = Depends(request_openai_api_key),
+) -> StreamingResponse:
+    openai_api_key = require_openai_api_key(openai_api_key)
     session = load_session(session_id)
     node = _get_node(session, node_id)
     if not session.focus_node_id:
@@ -114,7 +126,12 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
             revealed_nodes, revealed_edges = reveal_direct_phase2_children(session, node)
             merge_save_session(session)
             asyncio.create_task(
-                _prefetch_descendants(session.id, [child.id for child in revealed_nodes], goal_label)
+                _prefetch_descendants(
+                    session.id,
+                    [child.id for child in revealed_nodes],
+                    goal_label,
+                    openai_api_key=openai_api_key,
+                )
             )
             yield _sse("node_updated", node.model_dump(by_alias=True))
             for child in revealed_nodes:
@@ -144,6 +161,7 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
             known_topics,
             goal_label,
             context_path=context_path,
+            openai_api_key=openai_api_key,
         ):
             event_name = event["event"]
             data = event["data"]
@@ -199,7 +217,14 @@ async def expand_node(session_id: str, node_id: str) -> StreamingResponse:
             yield _sse(event_name, data)
             if event_name in {"stream_done", "stream_error"}:
                 if event_name == "stream_done" and revealed_node_ids:
-                    asyncio.create_task(_prefetch_descendants(session.id, revealed_node_ids, goal_label))
+                    asyncio.create_task(
+                        _prefetch_descendants(
+                            session.id,
+                            revealed_node_ids,
+                            goal_label,
+                            openai_api_key=openai_api_key,
+                        )
+                    )
                 return
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -210,6 +235,7 @@ async def suggest_node_prerequisite(
     session_id: str,
     node_id: str,
     payload: SuggestPrerequisiteRequest,
+    openai_api_key: str | None = Depends(request_openai_api_key),
 ) -> dict:
     session = load_session(session_id)
     parent = _get_node(session, node_id)
@@ -218,10 +244,12 @@ async def suggest_node_prerequisite(
     if not can_add_phase2_children(parent):
         raise HTTPException(status_code=400, detail="Maximum Phase 2 depth reached.")
 
+    openai_api_key = require_openai_api_key(openai_api_key)
     suggestion = await suggest_prerequisite(
         payload.message,
         parent.label,
         parent.description or "",
+        openai_api_key=openai_api_key,
     )
     child = GraphNode(
         label=suggestion["label"],
@@ -243,7 +271,11 @@ async def suggest_node_prerequisite(
 
 
 @router.post("/session/{session_id}/node/{node_id}/explain")
-async def explain_node(session_id: str, node_id: str) -> dict:
+async def explain_node(
+    session_id: str,
+    node_id: str,
+    openai_api_key: str | None = Depends(request_openai_api_key),
+) -> dict:
     session = load_session(session_id)
     node = _get_node(session, node_id)
     if node.node_state != "grayed":
@@ -251,10 +283,12 @@ async def explain_node(session_id: str, node_id: str) -> dict:
     if not node.parent_id:
         raise HTTPException(status_code=400, detail="Node has no parent context.")
     parent = _get_node(session, node.parent_id)
+    openai_api_key = require_openai_api_key(openai_api_key)
     text = await explain_prerequisite(
         node.label,
         parent.label,
         parent.description or "",
+        openai_api_key=openai_api_key,
     )
     node.explain_more_text = text
     save_session(session)

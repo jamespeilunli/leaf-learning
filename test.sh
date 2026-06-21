@@ -35,7 +35,7 @@ usage() {
   echo "Usage: ./test.sh [--openai]"
   echo
   echo "By default, backend tests use deterministic mock AI output."
-  echo "Use --openai to allow backend tests to call real OpenAI APIs using backend/.env."
+  echo "Use --openai to allow backend tests to call real OpenAI APIs using ALPHAG3N_TEST_OPENAI_API_KEY."
 }
 
 while (($#)); do
@@ -58,8 +58,8 @@ done
 
 if [[ "$AI_MODE" == "openai" ]]; then
   load_backend_env
-  if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-    echo "OPENAI_API_KEY is required in the environment or backend/.env when running ./test.sh --openai" >&2
+  if [[ -z "${ALPHAG3N_TEST_OPENAI_API_KEY:-}" ]]; then
+    echo "ALPHAG3N_TEST_OPENAI_API_KEY is required in the environment when running ./test.sh --openai" >&2
     exit 2
   fi
 fi
@@ -70,7 +70,7 @@ echo "Running backend tests..."
   if [[ "$AI_MODE" == "openai" ]]; then
     ALPHAG3N_AI_MODE=mock uv run python -m unittest discover -s tests
     echo "Running OpenAI integration tests..."
-    ALPHAG3N_AI_MODE=openai ALPHAG3N_TEST_ALLOW_REAL_AI=1 uv run python -m unittest tests.openai_integration
+    ALPHAG3N_AI_MODE=openai ALPHAG3N_USE_OPENAI=true ALPHAG3N_TEST_ALLOW_REAL_AI=1 uv run python -m unittest tests.openai_integration
   else
     ALPHAG3N_AI_MODE=mock uv run python -m unittest discover -s tests
   fi

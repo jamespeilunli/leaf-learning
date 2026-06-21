@@ -15,12 +15,15 @@ class OpenAIIntegrationTests(unittest.TestCase):
     def test_explain_prerequisite_uses_real_openai(self) -> None:
         self.assertIn(os.getenv("ALPHAG3N_USE_OPENAI", "").strip().lower(), {"1", "true", "yes", "on"})
         self.assertFalse(using_mock_ai())
+        api_key = os.getenv("ALPHAG3N_TEST_OPENAI_API_KEY", "").strip()
+        self.assertTrue(api_key)
 
         text = asyncio.run(
             explain_prerequisite(
                 "vector spaces",
                 "representation learning",
                 "Learned representations often encode examples as vectors.",
+                openai_api_key=api_key,
             )
         )
 

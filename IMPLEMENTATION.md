@@ -21,7 +21,7 @@ Read DESIGN.md first. This document specifies every file, API contract, data str
 │   │       ├── graph.py
 │   │       └── chat.py
 │   ├── sessions/               ← gitignored, created at runtime
-│   ├── .env                    ← gitignored, contains OPENAI_API_KEY
+│   ├── .env                    ← gitignored, contains backend runtime flags
 │   ├── requirements.txt
 │   └── README.md
 ├── frontend/
@@ -76,7 +76,7 @@ sse-starlette>=1.8.0
 
 ### Environment
 
-One required environment variable: `OPENAI_API_KEY`. Loaded via `python-dotenv` from `backend/.env` at startup. No other configuration.
+OpenAI mode is controlled by `ALPHAG3N_USE_OPENAI`. User API keys are entered in the frontend and sent to the backend per AI request.
 
 ---
 
@@ -206,7 +206,7 @@ def list_sessions() -> list[dict]:
 
 ### `backend/app/ai.py`
 
-All OpenAI calls live here. Use `AsyncOpenAI()` at module level (reads `OPENAI_API_KEY` from environment). All functions that produce graph events are async generators yielding dicts. The routers convert these dicts to SSE format.
+All OpenAI calls live here. Build `AsyncOpenAI(api_key=...)` from the request-scoped frontend key. All functions that produce graph events are async generators yielding dicts. The routers convert these dicts to SSE format.
 
 Use `client.responses.create(...)` for all calls (Responses API, not Chat Completions). This is required for `web_search_preview` support and is used consistently for all calls.
 
@@ -976,7 +976,7 @@ Chat history from `node.chat_history` is pre-populated in the message list when 
 cd backend
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-echo "OPENAI_API_KEY=sk-..." > .env
+echo "ALPHAG3N_USE_OPENAI=true" > .env
 uvicorn app.main:app --reload --port 8000
 ```
 

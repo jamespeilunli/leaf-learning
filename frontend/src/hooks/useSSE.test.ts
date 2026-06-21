@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { streamSSE } from './useSSE'
+import { OPENAI_API_KEY_HEADER, OPENAI_API_KEY_STORAGE_KEY } from '../lib/openAiApiKey'
 
 async function collect<T>(iterable: AsyncGenerator<T>): Promise<T[]> {
   const items: T[] = []
@@ -63,6 +64,23 @@ describe('streamSSE', () => {
     expect(fetchMock).toHaveBeenCalledWith('https://backend.example.com/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'hi' }),
+    })
+  })
+
+  it('adds the saved OpenAI API key header', async () => {
+    localStorage.setItem(OPENAI_API_KEY_STORAGE_KEY, 'sk-user-key')
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: streamFromText('event: stream_done\ndata: {}\n\n'),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await collect(streamSSE('/api/chat', { message: 'hi' }))
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [OPENAI_API_KEY_HEADER]: 'sk-user-key' },
       body: JSON.stringify({ message: 'hi' }),
     })
   })

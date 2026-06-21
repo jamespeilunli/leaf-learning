@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from './api'
 import { getApiBaseUrl } from './apiConfig'
+import { OPENAI_API_KEY_HEADER, OPENAI_API_KEY_STORAGE_KEY } from './openAiApiKey'
 import { makeSession } from '../test/fixtures'
 
 const mocks = vi.hoisted(() => ({
@@ -48,6 +49,20 @@ describe('api client', () => {
     expect(mocks.get).toHaveBeenCalledWith('/session/session-1')
     expect(mocks.get).toHaveBeenCalledWith('/sessions')
     expect(mocks.del).toHaveBeenCalledWith('/sessions')
+  })
+
+  it('adds the saved OpenAI API key header to requests', async () => {
+    const session = makeSession()
+    localStorage.setItem(OPENAI_API_KEY_STORAGE_KEY, 'sk-user-key')
+    mocks.post.mockResolvedValueOnce({ data: { session_id: 'session-1', session } })
+
+    await api.createSession('ML')
+
+    expect(mocks.post).toHaveBeenCalledWith(
+      '/session',
+      { topic: 'ML' },
+      { headers: { [OPENAI_API_KEY_HEADER]: 'sk-user-key' } },
+    )
   })
 
   it('maps graph mutation endpoints to the backend contract', async () => {

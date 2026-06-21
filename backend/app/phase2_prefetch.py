@@ -155,6 +155,7 @@ async def prefetch_phase2_tree(
     goal_label: str,
     on_progress: Callable[[Session], None] | None = None,
     max_layers_from_start: int | None = None,
+    openai_api_key: str | None = None,
 ) -> None:
     """Generate hidden Phase 2 descendants breadth-first within a start-relative layer budget."""
     layer_budget = phase2_max_depth_from_focus() if max_layers_from_start is None else max_layers_from_start
@@ -173,7 +174,13 @@ async def prefetch_phase2_tree(
             continue
 
         if not node.child_ids:
-            await generate_direct_phase2_children(session, node, goal_label, max_child_depth=max_depth)
+            await generate_direct_phase2_children(
+                session,
+                node,
+                goal_label,
+                max_child_depth=max_depth,
+                openai_api_key=openai_api_key,
+            )
             if on_progress:
                 on_progress(session)
 
@@ -188,12 +195,19 @@ async def generate_direct_phase2_children(
     node: GraphNode,
     goal_label: str,
     max_child_depth: int = PHASE2_ABSOLUTE_MAX_DEPTH,
+    openai_api_key: str | None = None,
 ) -> None:
     blocked_labels = _ancestor_labels(session, node) | _existing_child_labels(session, node)
     known_topics = sorted(set(session.known_topics) | blocked_labels)
     context_path = phase2_context_path(session, node)
 
-    async for event in expand_phase2_node(node.label, known_topics, goal_label, context_path=context_path):
+    async for event in expand_phase2_node(
+        node.label,
+        known_topics,
+        goal_label,
+        context_path=context_path,
+        openai_api_key=openai_api_key,
+    ):
         event_name = event["event"]
         data = event["data"]
 
@@ -250,6 +264,7 @@ async def prefetch_child_layers(
     node: GraphNode,
     goal_label: str,
     on_progress: Callable[[Session], None] | None = None,
+    openai_api_key: str | None = None,
 ) -> None:
     max_depth = min(PHASE2_ABSOLUTE_MAX_DEPTH, node.depth + PHASE2_INCREMENTAL_PREFETCH_LAYERS)
 
@@ -257,7 +272,13 @@ async def prefetch_child_layers(
         child = session.nodes.get(child_id)
         if not child or child.phase != "2" or child.depth > max_depth or child.child_ids:
             continue
-        await generate_direct_phase2_children(session, child, goal_label, max_child_depth=max_depth)
+        await generate_direct_phase2_children(
+            session,
+            child,
+            goal_label,
+            max_child_depth=max_depth,
+            openai_api_key=openai_api_key,
+        )
         if on_progress:
             on_progress(session)
 

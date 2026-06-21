@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '../lib/api'
 import * as browserData from '../lib/browserData'
+import { OPENAI_API_KEY_STORAGE_KEY } from '../lib/openAiApiKey'
 import { streamSSE } from '../hooks/useSSE'
 import { GraphCanvas } from './GraphCanvas'
 import { GrayedNode } from './GrayedNode'
@@ -163,6 +164,11 @@ describe('frontend components', () => {
     expect(
       screen.getByLabelText('Ready to learn?').compareDocumentPosition(resumeHeading),
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    await user.type(screen.getByLabelText('OpenAI API key'), ' sk-user-key ')
+    await user.click(screen.getByRole('button', { name: 'Save key' }))
+    expect(localStorage.getItem(OPENAI_API_KEY_STORAGE_KEY)).toBe('sk-user-key')
+    expect(screen.getByText('Saved locally')).toBeInTheDocument()
+
     await user.type(screen.getByLabelText('Ready to learn?'), 'machine learning')
     await user.click(screen.getByRole('button', { name: 'Start exploring' }))
 
@@ -179,6 +185,7 @@ describe('frontend components', () => {
     mockedApi.clearSessions.mockResolvedValue({ deleted_count: 1 })
     setStoreSession(makeSession())
     localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
+    localStorage.setItem(OPENAI_API_KEY_STORAGE_KEY, 'sk-user-key')
 
     render(<StartScreen />)
 
@@ -186,6 +193,7 @@ describe('frontend components', () => {
 
     await waitFor(() => expect(mockedClearBrowserData).toHaveBeenCalledTimes(1))
     expect(useSessionStore.getState().session).toBeNull()
+    expect(localStorage.getItem(OPENAI_API_KEY_STORAGE_KEY)).toBeNull()
   })
 
   it('Phase1OptionCard displays subtopic context and selects the node', async () => {

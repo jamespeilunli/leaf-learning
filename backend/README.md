@@ -16,10 +16,11 @@ working API key.
 ALPHAG3N_USE_OPENAI=false uv run uvicorn app.main:app --reload --port 8000
 ```
 
-To use OpenAI instead, set a real key and enable it explicitly:
+To use OpenAI instead, enable it explicitly. Users enter their API key in the
+frontend, and the browser passes it to the backend for each AI request:
 
 ```bash
-ALPHAG3N_USE_OPENAI=true OPENAI_API_KEY=sk-your-real-key uv run uvicorn app.main:app --reload --port 8000
+ALPHAG3N_USE_OPENAI=true uv run uvicorn app.main:app --reload --port 8000
 ```
 
 The React dev server proxies `/api/*` requests to `http://localhost:8000`.
