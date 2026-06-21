@@ -10,7 +10,6 @@ from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
 
-from app import storage
 from app.main import app
 
 
@@ -26,13 +25,7 @@ def configure_test_ai_mode() -> None:
 @contextmanager
 def isolated_sessions_dir() -> Iterator[Path]:
     with TemporaryDirectory() as directory:
-        previous = storage.SESSIONS_DIR
-        storage.SESSIONS_DIR = Path(directory)
-        storage.ensure_sessions_dir()
-        try:
-            yield storage.SESSIONS_DIR
-        finally:
-            storage.SESSIONS_DIR = previous
+        yield Path(directory)
 
 
 def test_client() -> TestClient:

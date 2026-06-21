@@ -29,7 +29,7 @@ class CorsConfigTests(unittest.TestCase):
 
     def test_allowed_origin_receives_cors_header(self) -> None:
         response = test_client().get(
-            "/api/sessions",
+            "/health",
             headers={"Origin": "https://alphag3n-hackathon-2026-u87w.onrender.com"},
         )
 

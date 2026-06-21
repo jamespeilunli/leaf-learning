@@ -2,14 +2,11 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ArrowRight, Clock3, KeyRound, Leaf, Loader2, RotateCcw, Save } from 'lucide-react'
 
-import { listSessions } from '../lib/api'
 import { getOpenAiApiKey, saveOpenAiApiKey } from '../lib/openAiApiKey'
+import { listLocalSessionSummaries, type SessionSummary } from '../lib/sessionPersistence'
 import { useSessionStore } from '../store/useSessionStore'
-import type { Phase } from '../types'
 import { LaunchGraphBackground } from './LaunchGraphBackground'
 import { Button, Eyebrow, Panel, StatusNotice, TextArea, TextInput } from './ui'
-
-type SessionRow = { id: string; root_topic: string; created_at: string; phase: Phase }
 
 export function StartScreen() {
   const initSession = useSessionStore((state) => state.initSession)
@@ -18,33 +15,14 @@ export function StartScreen() {
   const isLoading = useSessionStore((state) => state.isLoading)
   const error = useSessionStore((state) => state.error)
   const [topic, setTopic] = useState('')
-  const [sessions, setSessions] = useState<SessionRow[]>([])
-  const [isLoadingSessions, setIsLoadingSessions] = useState(true)
-  const [sessionListError, setSessionListError] = useState(false)
+  const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [apiKey, setApiKey] = useState(() => getOpenAiApiKey())
   const [apiKeyStatus, setApiKeyStatus] = useState<'empty' | 'dirty' | 'saved'>(
     () => (getOpenAiApiKey() ? 'saved' : 'empty'),
   )
 
   useEffect(() => {
-    let active = true
-    void listSessions()
-      .then((data) => {
-        if (active) setSessions(data)
-      })
-      .catch(() => {
-        if (active) {
-          setSessions([])
-          setSessionListError(true)
-        }
-      })
-      .finally(() => {
-        if (active) setIsLoadingSessions(false)
-      })
-
-    return () => {
-      active = false
-    }
+    setSessions(listLocalSessionSummaries())
   }, [])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -98,7 +76,6 @@ export function StartScreen() {
                 void restartFlow().then((cleared) => {
                   if (cleared) {
                     setSessions([])
-                    setSessionListError(false)
                     setApiKey('')
                     setApiKeyStatus('empty')
                   }
@@ -201,26 +178,12 @@ export function StartScreen() {
             </Panel>
           </form>
 
-          {isLoadingSessions || sessionListError || sessions.length ? (
+          {sessions.length ? (
             <Panel className="mx-auto mt-5 max-w-3xl border-white/60 bg-white/62 p-4 backdrop-blur-xl sm:p-5">
               <div className="flex items-center justify-between gap-3">
                 <Eyebrow>Continue a previous session</Eyebrow>
-                {isLoadingSessions ? (
-                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin text-[var(--muted)]" />
-                ) : (
-                  <span className="text-xs font-semibold text-[var(--muted)]">{sessions.length}</span>
-                )}
+                <span className="text-xs font-semibold text-[var(--muted)]">{sessions.length}</span>
               </div>
-              {sessionListError ? (
-                <StatusNotice className="mt-3" tone="error">
-                  Previous sessions could not be loaded. You can still start a new topic.
-                </StatusNotice>
-              ) : null}
-              {isLoadingSessions ? (
-                <StatusNotice className="mt-3" tone="loading">
-                  Finding saved learning maps...
-                </StatusNotice>
-              ) : null}
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 {sessions.map((session) => (
                   <button

@@ -8,6 +8,7 @@ import { SESSION_STORAGE_KEY, useSessionStore } from './useSessionStore'
 import { makeNode, makePhase2Session, makeSession } from '../test/fixtures'
 import { resetSessionStore } from '../test/storeTestUtils'
 import type { GraphEdge, Session } from '../types'
+import { loadLocalSession, saveLocalSession } from '../lib/sessionPersistence'
 
 vi.mock('../lib/api')
 vi.mock('../hooks/useSSE', () => ({
@@ -42,13 +43,14 @@ describe('useSessionStore', () => {
 
     expect(mockedApi.createSession).toHaveBeenCalledWith('machine learning')
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBe('session-1')
+    expect(loadLocalSession('session-1')).toEqual(session)
     expect(getState().session).toBe(session)
     expect(getState().isLoading).toBe(false)
   })
 
   it('loads sessions and clears stale ids on failure', async () => {
     const session = makeSession()
-    mockedApi.getSession.mockResolvedValueOnce(session)
+    saveLocalSession(session)
 
     await getState().loadSession('session-1')
 
@@ -56,8 +58,7 @@ describe('useSessionStore', () => {
     expect(getState().sessionId).toBe('session-1')
     expect(getState().activeView).toBe('phase1')
 
-    mockedApi.getSession.mockRejectedValueOnce(new Error('missing'))
-    await expect(getState().loadSession('missing')).rejects.toThrow('missing')
+    await expect(getState().loadSession('missing')).rejects.toThrow('Saved session not found.')
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
     expect(getState().session).toBeNull()
     expect(getState().activeView).toBe('home')
@@ -65,44 +66,42 @@ describe('useSessionStore', () => {
 
   it('runs phase 1 navigation and expansion mutations through the API', async () => {
     useSessionStore.setState({ sessionId: 'session-1', session: makeSession() })
-    const selected = makeSession({ current_phase1_node_id: 'child-a', selection_history: ['root'] })
-    const expanded = makeSession({
-      nodes: {
-        ...makeSession().nodes,
-        'child-a': makeNode({
-          id: 'child-a',
-          label: 'Representation Learning',
-          child_ids: ['grandchild'],
-        }),
-      },
+    const grandchild = makeNode({
+      id: 'grandchild',
+      label: 'Neural Embeddings',
+      parent_id: 'child-a',
+      depth: 2,
     })
-    const backed = makeSession()
-    mockedApi.selectTopic.mockResolvedValue(selected)
-    mockedApi.expandPhase1Topic.mockResolvedValue(expanded)
-    mockedApi.back.mockResolvedValue(backed)
+    mockedApi.generatePhase1Children.mockResolvedValue({ children: [grandchild] })
 
     await getState().selectTopic('child-a')
-    expect(getState().session).toBe(selected)
+    expect(getState().session?.current_phase1_node_id).toBe('child-a')
+    expect(getState().session?.selection_history).toEqual(['root'])
+    expect(getState().session?.nodes['child-a'].child_ids).toEqual(['grandchild'])
+    expect(mockedApi.generatePhase1Children).toHaveBeenCalledWith(
+      expect.objectContaining({ current_phase1_node_id: 'child-a' }),
+      'child-a',
+    )
 
     await getState().expandPhase1Topic('child-a')
-    expect(mockedApi.expandPhase1Topic).toHaveBeenCalledWith('session-1', 'child-a')
-    expect(getState().session).toBe(expanded)
+    expect(mockedApi.generatePhase1Children).toHaveBeenCalledTimes(1)
 
     await getState().back()
-    expect(getState().session).toBe(backed)
+    expect(getState().session?.current_phase1_node_id).toBe('root')
+    expect(getState().session?.selection_history).toEqual([])
   })
 
   it('starts deep dive and expands the focus node', async () => {
-    useSessionStore.setState({ sessionId: 'session-1', session: makeSession() })
     const phase2 = makePhase2Session()
-    mockedApi.deepDive.mockResolvedValue({ session: phase2 })
+    useSessionStore.setState({ sessionId: 'session-1', session: phase2 })
     mockedStreamSSE.mockImplementation(async function* () {})
 
     await getState().deepDive('goal')
     await getState().expandNode('goal')
 
-    expect(mockedApi.deepDive).toHaveBeenCalledWith('session-1', 'goal')
-    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/goal/expand', {})
+    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/goal/expand', {
+      session: expect.objectContaining({ id: 'session-1' }),
+    })
     expect(getState().streamingNodeIds.size).toBe(0)
     expect(getState().activeView).toBe('phase2')
   })
@@ -120,7 +119,6 @@ describe('useSessionStore', () => {
     expect(getState().session?.phase).toBe('2')
 
     getState().returnHome()
-    expect(mockedApi.clearSessions).not.toHaveBeenCalled()
     expect(mockedClearBrowserData).not.toHaveBeenCalled()
     expect(getState().activeView).toBe('home')
     expect(getState().session).toBeNull()
@@ -181,6 +179,13 @@ describe('useSessionStore', () => {
     expect(updated.nodes.goal.sources[0].title).toBe('Advanced Resource')
     expect(updated.nodes.goal.child_ids).toContain('vector')
     expect(updated.edges).toContainEqual(edge)
+    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/goal/expand', {
+      session: expect.objectContaining({
+        nodes: expect.objectContaining({
+          goal: expect.objectContaining({ node_state: 'grayed' }),
+        }),
+      }),
+    })
   })
 
   it('shows streamed child nodes before expansion completes', async () => {
@@ -328,7 +333,9 @@ describe('useSessionStore', () => {
     await getState().expandNode('branch')
 
     const updated = getState().session as Session
-    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/branch/expand', {})
+    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/branch/expand', {
+      session: expect.objectContaining({ id: 'session-1' }),
+    })
     expect(updated.nodes.branch.child_ids).toEqual(['basis'])
     expect(updated.nodes.sibling.child_ids).toEqual([])
     expect(updated.nodes.basis.depth).toBe(3)
@@ -338,10 +345,9 @@ describe('useSessionStore', () => {
     const session = makePhase2Session()
     useSessionStore.setState({ sessionId: 'session-1', session })
     mockedApi.explainNode.mockResolvedValue({ explain_more_text: 'Vector spaces explanation.' })
-    mockedApi.updateNodeState.mockImplementation(async () => useSessionStore.getState().session as Session)
-    mockedApi.deleteNode.mockResolvedValue({ removed_node_ids: ['prereq'] })
 
     await getState().explainNode('prereq')
+    expect(mockedApi.explainNode).toHaveBeenCalledWith('session-1', 'prereq', session)
     expect((getState().session as Session).nodes.prereq.explain_more_text).toBe('Vector spaces explanation.')
 
     await getState().markLearned('prereq')
@@ -376,12 +382,6 @@ describe('useSessionStore', () => {
       streamingNodeIds: new Set(['nested']),
       explainingNodeIds: new Set(['prereq']),
     })
-    mockedApi.deleteNode.mockRejectedValue({
-      isAxiosError: true,
-      response: { status: 404 },
-      message: 'not found',
-    })
-
     await getState().deleteNode('prereq')
 
     const pruned = getState().session as Session
@@ -405,7 +405,6 @@ describe('useSessionStore', () => {
       selectedPhase2NodeId: 'goal',
     })
     localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
-    mockedApi.clearSessions.mockResolvedValue({ deleted_count: 1 })
 
     getState().openChat('goal')
     expect(getState().chatOpenNodeId).toBe('goal')
@@ -414,7 +413,6 @@ describe('useSessionStore', () => {
     expect(getState().chatOpenNodeId).toBeNull()
 
     await expect(getState().restartFlow()).resolves.toBe(true)
-    expect(mockedApi.clearSessions).toHaveBeenCalledTimes(1)
     expect(mockedClearBrowserData).toHaveBeenCalledTimes(1)
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
     expect(getState().session).toBeNull()
@@ -425,13 +423,12 @@ describe('useSessionStore', () => {
 
   it('stores API and stream failures as user-visible errors', async () => {
     useSessionStore.setState({ sessionId: 'session-1', session: makePhase2Session() })
-    mockedApi.selectTopic.mockRejectedValue(new Error('select failed'))
     mockedStreamSSE.mockImplementation(async function* () {
       yield { event: 'stream_error', data: { message: 'expand failed' } }
     })
 
     await getState().selectTopic('missing')
-    expect(getState().error).toBe('select failed')
+    expect(getState().error).toBe('Topic not found.')
 
     await getState().expandNode('prereq')
     expect(getState().error).toBe('expand failed')

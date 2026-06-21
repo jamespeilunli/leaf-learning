@@ -6,6 +6,7 @@ import { Send, X } from 'lucide-react'
 import { streamSSE } from '../hooks/useSSE'
 import { useSessionStore } from '../store/useSessionStore'
 import type { ChatMessage } from '../types'
+import { stripChatHistory } from '../lib/sessionPayload'
 import { Button, Eyebrow, IconButton, StatusNotice, TextArea } from './ui'
 
 type LocalMessage = ChatMessage & { id: string }
@@ -19,7 +20,7 @@ export function NodeChatPanel() {
   const sessionId = useSessionStore((state) => state.sessionId)
   const chatOpenNodeId = useSessionStore((state) => state.chatOpenNodeId)
   const closeChat = useSessionStore((state) => state.closeChat)
-  const loadSession = useSessionStore((state) => state.loadSession)
+  const appendChatExchange = useSessionStore((state) => state.appendChatExchange)
 
   const node = useMemo(() => {
     if (!session || !chatOpenNodeId) return null
@@ -38,12 +39,20 @@ export function NodeChatPanel() {
     containerRef.current?.scrollTo({ top: containerRef.current.scrollHeight })
   }, [messages])
 
+  useEffect(() => {
+    setMessages(node?.chat_history.map(toLocalMessage) ?? [])
+    setDraft('')
+    setError(null)
+  }, [node?.id, node?.chat_history])
+
   if (!session || !sessionId || !node) {
     return null
   }
 
+  const activeSession = session
+  const activeNode = node
   const activeSessionId = sessionId
-  const activeNodeId = node.id
+  const activeNodeId = activeNode.id
 
   async function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -68,12 +77,17 @@ export function NodeChatPanel() {
     setIsStreaming(true)
     setMessages((current) => [...current, userMessage, assistantMessage])
 
+    let completed = false
+    let fullResponse = ''
     try {
       for await (const eventItem of streamSSE(`/api/session/${activeSessionId}/node/${activeNodeId}/chat`, {
         message: trimmed,
+        session: stripChatHistory(activeSession),
+        history: activeNode.chat_history.slice(-20),
       })) {
         if (eventItem.event === 'token') {
           const data = eventItem.data as { text?: string }
+          fullResponse += data.text ?? ''
           setMessages((current) =>
             current.map((message) =>
               message.id === assistantMessage.id
@@ -86,9 +100,14 @@ export function NodeChatPanel() {
           const data = eventItem.data as { message?: string }
           setError(data.message ?? 'Chat stream failed.')
         }
+        if (eventItem.event === 'stream_done') {
+          completed = true
+        }
       }
 
-      await loadSession(activeSessionId)
+      if (completed) {
+        appendChatExchange(activeNodeId, trimmed, fullResponse)
+      }
     } catch (streamError) {
       setError(streamError instanceof Error ? streamError.message : 'Chat stream failed.')
     } finally {

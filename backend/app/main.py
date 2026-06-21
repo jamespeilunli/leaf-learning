@@ -31,9 +31,6 @@ configure_logging()
 
 from app.routers import chat, graph, session
 from app.cors import get_cors_origins
-from app.storage import ensure_sessions_dir
-
-ensure_sessions_dir()
 
 app = FastAPI(title="Learning Roadmap API")
 

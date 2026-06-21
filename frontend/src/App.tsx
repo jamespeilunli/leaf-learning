@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
 
-import axios from 'axios'
 import { ReactFlowProvider } from 'reactflow'
 
 import { GraphCanvas } from './components/GraphCanvas'
@@ -20,10 +19,8 @@ function App() {
     const sessionId = localStorage.getItem(SESSION_STORAGE_KEY)
     if (!sessionId) return
 
-    void loadSession(sessionId).catch((error) => {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        localStorage.removeItem(SESSION_STORAGE_KEY)
-      }
+    void loadSession(sessionId).catch(() => {
+      localStorage.removeItem(SESSION_STORAGE_KEY)
     })
   }, [loadSession])
 

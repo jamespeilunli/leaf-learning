@@ -78,7 +78,7 @@ When the user presses "Explain more" on a grayed node, the app calls the AI with
 
 Every fully expanded node has a chat toggle. Opening it reveals a streaming chat panel scoped to that node. The system context includes the node's label, description, resource summary, technical depth, and the path from the root goal down to this node. The user can ask questions and get tutor-style responses without leaving the graph.
 
-Chat history per node is persisted in the session.
+Chat history per node is persisted in the browser-local session only. The backend receives bounded history for a single chat request but does not store it.
 
 ### Pruning
 
@@ -171,9 +171,9 @@ created_at: ISO timestamp
 
 ## Storage
 
-All state is stored as flat JSON files in `backend/sessions/`. One file per session, named `<session_id>.json`. The backend reads the file at request start and writes it on any mutation. No database, no migrations. The `sessions/` directory is created by the backend on startup and is gitignored.
+All user session state is stored in frontend `localStorage`. The backend is stateless for roadmap data: it generates AI-backed nodes, explanations, prerequisites, prefetch results, and chat streams from request payloads, then returns the result without writing session data.
 
-The frontend stores the active `session_id` in `localStorage`. On app load, if a session ID is found, it fetches the full session from the backend and restores state.
+The frontend stores the active `session_id` and a local map of serialized sessions in `localStorage`. On app load, if a session ID is found, it restores the full session from browser storage.
 
 ---
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from collections.abc import Iterable
@@ -21,19 +20,24 @@ from app.phase2_prefetch import (
     prefetch_phase2_tree,
     reveal_direct_phase2_children,
 )
-from app.storage import load_session, merge_save_session, save_session
 
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-class UpdateNodeStateRequest(BaseModel):
-    node_state: str
+class SessionSnapshotRequest(BaseModel):
+    session: Session
 
 
 class SuggestPrerequisiteRequest(BaseModel):
+    session: Session
     message: str
+
+
+class PrefetchPhase2Request(BaseModel):
+    session: Session
+    start_node_ids: list[str]
 
 
 def _sse(event: str, data: object) -> str:
@@ -47,92 +51,46 @@ def _get_node(session: Session, node_id: str) -> GraphNode:
     return node
 
 
-def _normalized(label: str) -> str:
-    return " ".join(label.lower().strip().split())
+def _normalize_session(session: Session) -> Session:
+    return session.model_copy(deep=True)
 
 
-def _collect_descendants(session: Session, node_id: str) -> set[str]:
-    collected = {node_id}
-    stack = [node_id]
-    while stack:
-        current_id = stack.pop()
-        current = session.nodes.get(current_id)
-        if not current:
-            continue
-        for child_id in current.child_ids:
-            if child_id not in collected:
-                collected.add(child_id)
-                stack.append(child_id)
-    return collected
-
-
-async def _prefetch_descendants(
-    session_id: str,
-    start_node_ids: list[str],
-    goal_label: str,
-    openai_api_key: str | None = None,
-) -> None:
-    try:
-        session = load_session(session_id)
-        for start_node_id in start_node_ids:
-            start_node = session.nodes.get(start_node_id)
-            if not start_node:
-                continue
-            await prefetch_phase2_tree(
-                session,
-                start_node,
-                goal_label,
-                on_progress=merge_save_session,
-                max_layers_from_start=PHASE2_INCREMENTAL_PREFETCH_LAYERS,
-                openai_api_key=openai_api_key,
-            )
-        merge_save_session(session)
-    except Exception:
-        return
+def _new_graph_items(before: Session, after: Session) -> tuple[list[GraphNode], list[GraphEdge]]:
+    before_node_ids = set(before.nodes)
+    before_edge_ids = {edge.id for edge in before.edges}
+    nodes = [node for node_id, node in after.nodes.items() if node_id not in before_node_ids]
+    edges = [edge for edge in after.edges if edge.id not in before_edge_ids]
+    return nodes, edges
 
 
 @router.post("/session/{session_id}/node/{node_id}/expand")
 async def expand_node(
     session_id: str,
     node_id: str,
+    payload: SessionSnapshotRequest,
     openai_api_key: str | None = Depends(request_openai_api_key),
 ) -> StreamingResponse:
+    del session_id
     openai_api_key = require_openai_api_key(openai_api_key)
-    session = load_session(session_id)
+    session = _normalize_session(payload.session)
     node = _get_node(session, node_id)
     if not session.focus_node_id:
         raise HTTPException(status_code=400, detail="Phase 2 focus node is not set.")
-    if node.node_state != "grayed" and node.id != session.focus_node_id:
+    if node.node_state not in {"grayed", "expanded"} and node.id != session.focus_node_id:
         raise HTTPException(status_code=400, detail="Node is not expandable.")
     node.node_state = "expanded"
     node.phase = "2"
     node.is_visible = True
-    session = merge_save_session(session)
-    node = _get_node(session, node_id)
     goal_label = _get_node(session, session.focus_node_id).label
 
     async def event_stream() -> Iterable[str]:
-        nonlocal session, node
-        session = merge_save_session(session)
-        node = _get_node(session, node_id)
-
         children_allowed = can_add_phase2_children(node)
 
         if children_allowed and not node.child_ids and adopt_prefetched_children_by_label(session, node):
-            session = merge_save_session(session)
-            node = _get_node(session, node_id)
+            yield _sse("node_updated", node.model_dump(by_alias=True))
 
         if children_allowed and node.child_ids:
             revealed_nodes, revealed_edges = reveal_direct_phase2_children(session, node)
-            merge_save_session(session)
-            asyncio.create_task(
-                _prefetch_descendants(
-                    session.id,
-                    [child.id for child in revealed_nodes],
-                    goal_label,
-                    openai_api_key=openai_api_key,
-                )
-            )
             yield _sse("node_updated", node.model_dump(by_alias=True))
             for child in revealed_nodes:
                 yield _sse("node_added", child.model_dump(by_alias=True))
@@ -155,7 +113,6 @@ async def expand_node(
         )
         known_topics = sorted(set(session.known_topics) | blocked_labels)
 
-        revealed_node_ids: list[str] = []
         async for event in expand_phase2_node(
             node.label,
             known_topics,
@@ -173,7 +130,6 @@ async def expand_node(
                     node.resource = Resource.model_validate(data["resource"])
                     if not node.sources:
                         node.sources = [node.resource]
-                merge_save_session(session)
                 yield _sse("node_updated", {"id": node.id, **data})
                 continue
 
@@ -198,8 +154,6 @@ async def expand_node(
                 session.nodes[child.id] = child
                 if child.id not in node.child_ids:
                     node.child_ids.append(child.id)
-                revealed_node_ids.append(child.id)
-                merge_save_session(session)
                 yield _sse("node_added", child.model_dump(by_alias=True))
                 continue
 
@@ -209,25 +163,47 @@ async def expand_node(
                 edge = GraphEdge.model_validate(data)
                 edge.from_id = node.id
                 session.edges.append(edge)
-                merge_save_session(session)
                 yield _sse("edge_added", edge.model_dump(by_alias=True))
                 continue
 
-            merge_save_session(session)
             yield _sse(event_name, data)
             if event_name in {"stream_done", "stream_error"}:
-                if event_name == "stream_done" and revealed_node_ids:
-                    asyncio.create_task(
-                        _prefetch_descendants(
-                            session.id,
-                            revealed_node_ids,
-                            goal_label,
-                            openai_api_key=openai_api_key,
-                        )
-                    )
                 return
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/session/{session_id}/phase2/prefetch")
+async def prefetch_phase2(
+    session_id: str,
+    payload: PrefetchPhase2Request,
+    openai_api_key: str | None = Depends(request_openai_api_key),
+) -> dict:
+    del session_id
+    openai_api_key = require_openai_api_key(openai_api_key)
+    before = _normalize_session(payload.session)
+    session = _normalize_session(payload.session)
+    if not session.focus_node_id:
+        raise HTTPException(status_code=400, detail="Phase 2 focus node is not set.")
+    goal_label = _get_node(session, session.focus_node_id).label
+
+    for start_node_id in payload.start_node_ids:
+        start_node = session.nodes.get(start_node_id)
+        if not start_node:
+            continue
+        await prefetch_phase2_tree(
+            session,
+            start_node,
+            goal_label,
+            max_layers_from_start=PHASE2_INCREMENTAL_PREFETCH_LAYERS,
+            openai_api_key=openai_api_key,
+        )
+
+    nodes, edges = _new_graph_items(before, session)
+    return {
+        "nodes": [node.model_dump(by_alias=True) for node in nodes],
+        "edges": [edge.model_dump(by_alias=True) for edge in edges],
+    }
 
 
 @router.post("/session/{session_id}/node/{node_id}/suggest-prerequisite")
@@ -237,7 +213,8 @@ async def suggest_node_prerequisite(
     payload: SuggestPrerequisiteRequest,
     openai_api_key: str | None = Depends(request_openai_api_key),
 ) -> dict:
-    session = load_session(session_id)
+    del session_id
+    session = _normalize_session(payload.session)
     parent = _get_node(session, node_id)
     if parent.node_state not in {"expanded", "learned"}:
         raise HTTPException(status_code=400, detail="Missing prerequisites can only be added to active nodes.")
@@ -260,10 +237,6 @@ async def suggest_node_prerequisite(
         depth=parent.depth + 1,
     )
     edge = GraphEdge(from_id=parent.id, to_id=child.id, label="requires")
-    session.nodes[child.id] = child
-    parent.child_ids.append(child.id)
-    session.edges.append(edge)
-    save_session(session)
     return {
         "node": child.model_dump(by_alias=True),
         "edge": edge.model_dump(by_alias=True),
@@ -274,9 +247,11 @@ async def suggest_node_prerequisite(
 async def explain_node(
     session_id: str,
     node_id: str,
+    payload: SessionSnapshotRequest,
     openai_api_key: str | None = Depends(request_openai_api_key),
 ) -> dict:
-    session = load_session(session_id)
+    del session_id
+    session = _normalize_session(payload.session)
     node = _get_node(session, node_id)
     if node.node_state != "grayed":
         raise HTTPException(status_code=400, detail="Only grayed nodes can be explained.")
@@ -290,60 +265,4 @@ async def explain_node(
         parent.description or "",
         openai_api_key=openai_api_key,
     )
-    node.explain_more_text = text
-    save_session(session)
     return {"explain_more_text": text}
-
-
-@router.delete("/session/{session_id}/node/{node_id}")
-def delete_node(session_id: str, node_id: str) -> dict:
-    session = load_session(session_id)
-    node = session.nodes.get(node_id)
-    if not node:
-        return {"removed_node_ids": [node_id]}
-
-    removed_node_ids = _collect_descendants(session, node_id)
-
-    if node.parent_id and node.parent_id in session.nodes:
-        parent = session.nodes[node.parent_id]
-        parent.child_ids = [child_id for child_id in parent.child_ids if child_id != node_id]
-
-    for removed_id in removed_node_ids:
-        session.nodes.pop(removed_id, None)
-
-    session.edges = [
-        edge
-        for edge in session.edges
-        if edge.from_id not in removed_node_ids and edge.to_id not in removed_node_ids
-    ]
-
-    save_session(session)
-    return {"removed_node_ids": sorted(removed_node_ids)}
-
-
-@router.patch("/session/{session_id}/node/{node_id}/status")
-def update_node_status(session_id: str, node_id: str, payload: UpdateNodeStateRequest) -> dict:
-    if payload.node_state not in {"learned", "grayed"}:
-        raise HTTPException(status_code=400, detail="Invalid node_state.")
-
-    session = load_session(session_id)
-    node = _get_node(session, node_id)
-    node.node_state = payload.node_state
-
-    if payload.node_state == "learned":
-        normalized = _normalized(node.label)
-        if normalized not in session.known_topics:
-            session.known_topics.append(normalized)
-        for other in session.nodes.values():
-            if other.node_state == "grayed" and _normalized(other.label) == normalized:
-                other.explain_more_text = "__known__"
-    else:
-        normalized = _normalized(node.label)
-        if normalized in session.known_topics:
-            session.known_topics = [topic for topic in session.known_topics if topic != normalized]
-        for other in session.nodes.values():
-            if other.explain_more_text == "__known__" and _normalized(other.label) == normalized:
-                other.explain_more_text = None
-
-    save_session(session)
-    return session.model_dump(by_alias=True)

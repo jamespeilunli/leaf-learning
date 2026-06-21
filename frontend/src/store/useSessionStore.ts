@@ -1,10 +1,11 @@
 import { create } from 'zustand'
-import axios from 'axios'
 
 import * as api from '../lib/api'
 import { clearBrowserData } from '../lib/browserData'
 import { streamSSE } from '../hooks/useSSE'
 import type { GraphEdge, GraphNode, Resource, Session } from '../types'
+import { loadLocalSession, saveLocalSession } from '../lib/sessionPersistence'
+import { stripChatHistory } from '../lib/sessionPayload'
 
 export const SESSION_STORAGE_KEY = 'roadmap_session_id'
 
@@ -52,6 +53,26 @@ function removeNodesFromSession(session: Session, removed: Set<string>): Session
   return { ...session, nodes, edges }
 }
 
+function appendChildrenToSession(session: Session, nodeId: string, children: GraphNode[]): Session {
+  if (!children.length) return session
+  const parent = session.nodes[nodeId]
+  if (!parent) return session
+
+  const nodes = { ...session.nodes }
+  const childIds = [...parent.child_ids]
+  for (const child of children) {
+    nodes[child.id] = child
+    if (!childIds.includes(child.id)) childIds.push(child.id)
+  }
+  nodes[nodeId] = { ...parent, child_ids: childIds }
+  return { ...session, nodes }
+}
+
+function persistSession(session: Session): Session {
+  saveLocalSession(session)
+  return session
+}
+
 type ExpandPatch = {
   id?: string
   resource?: Resource | null
@@ -88,11 +109,13 @@ interface SessionStore {
   restartFlow: () => Promise<boolean>
   openChat: (nodeId: string) => void
   closeChat: () => void
+  appendChatExchange: (nodeId: string, userMessage: string, assistantMessage: string) => void
   openNodeDetails: (nodeId: string) => void
   closeNodeDetails: () => void
   _applyNodeAdded: (node: GraphNode) => void
   _applyNodeUpdated: (patch: ExpandPatch) => void
   _applyEdgeAdded: (edge: GraphEdge) => void
+  _prefetchPhase2: (startNodeIds: string[]) => Promise<void>
 }
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
@@ -112,6 +135,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     try {
       const data = await api.createSession(topic)
       localStorage.setItem(SESSION_STORAGE_KEY, data.session_id)
+      saveLocalSession(data.session)
       set({
         sessionId: data.session_id,
         session: data.session,
@@ -129,7 +153,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   async loadSession(id) {
     set({ isLoading: true, error: null })
     try {
-      const session = await api.getSession(id)
+      const session = loadLocalSession(id)
+      if (!session) throw new Error('Saved session not found.')
       localStorage.setItem(SESSION_STORAGE_KEY, id)
       set({
         sessionId: id,
@@ -151,13 +176,28 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   async selectTopic(nodeId) {
-    const sessionId = get().sessionId
-    if (!sessionId) return
+    const session = get().session
+    if (!session) return
 
     set({ isLoading: true, error: null })
     try {
-      const session = await api.selectTopic(sessionId, nodeId)
-      set({ session, activeView: 'phase1', isLoading: false })
+      const currentId = session.current_phase1_node_id
+      const selected = session.nodes[nodeId]
+      if (!currentId || !selected) throw new Error('Topic not found.')
+
+      let nextSession: Session = {
+        ...session,
+        selection_history: [...session.selection_history, currentId],
+        current_phase1_node_id: nodeId,
+      }
+
+      if (!selected.child_ids.length) {
+        const response = await api.generatePhase1Children(nextSession, nodeId)
+        nextSession = appendChildrenToSession(nextSession, nodeId, response.children)
+      }
+
+      nextSession = persistSession(nextSession)
+      set({ session: nextSession, activeView: 'phase1', isLoading: false })
     } catch (error) {
       set({
         isLoading: false,
@@ -167,13 +207,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   async expandPhase1Topic(nodeId) {
-    const sessionId = get().sessionId
-    if (!sessionId) return
+    const session = get().session
+    if (!session) return
 
     set({ isLoading: true, error: null })
     try {
-      const session = await api.expandPhase1Topic(sessionId, nodeId)
-      set({ session, activeView: 'phase1', isLoading: false })
+      const selected = session.nodes[nodeId]
+      if (!selected) throw new Error('Topic not found.')
+
+      let nextSession = session
+      if (!selected.child_ids.length) {
+        const response = await api.generatePhase1Children(session, nodeId)
+        nextSession = persistSession(appendChildrenToSession(session, nodeId, response.children))
+      }
+
+      set({ session: nextSession, activeView: 'phase1', isLoading: false })
     } catch (error) {
       set({
         isLoading: false,
@@ -183,13 +231,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   async back() {
-    const sessionId = get().sessionId
-    if (!sessionId) return
+    const session = get().session
+    if (!session) return
 
     set({ isLoading: true, error: null })
     try {
-      const session = await api.back(sessionId)
-      set({ session, activeView: 'phase1', isLoading: false })
+      if (!session.selection_history.length) throw new Error('Already at root.')
+      const nextHistory = session.selection_history.slice(0, -1)
+      const nextSession = persistSession({
+        ...session,
+        selection_history: nextHistory,
+        current_phase1_node_id: session.selection_history[session.selection_history.length - 1],
+      })
+      set({ session: nextSession, activeView: 'phase1', isLoading: false })
     } catch (error) {
       set({
         isLoading: false,
@@ -199,13 +253,31 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   async deepDive(nodeId) {
-    const sessionId = get().sessionId
-    if (!sessionId) return
+    const session = get().session
+    if (!session) return
 
     set({ isLoading: true, error: null })
     try {
-      const response = await api.deepDive(sessionId, nodeId)
-      set({ session: response.session, activeView: 'phase2', isLoading: false })
+      const node = session.nodes[nodeId]
+      if (!node) throw new Error('Topic not found.')
+      const nextSession = persistSession({
+        ...session,
+        phase: '2',
+        focus_node_id: nodeId,
+        nodes: {
+          ...session.nodes,
+          [nodeId]: {
+            ...node,
+            phase: '2',
+            node_state: 'expanded',
+            is_visible: true,
+            child_ids: node.child_ids.filter(
+              (childId) => session.nodes[childId]?.phase === '2',
+            ),
+          },
+        },
+      })
+      set({ session: nextSession, activeView: 'phase2', isLoading: false })
     } catch (error) {
       set({
         isLoading: false,
@@ -218,6 +290,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const { sessionId, session } = get()
     if (!sessionId || !session) return
 
+    const requestSession = session
     const nextStreaming = new Set(get().streamingNodeIds)
     nextStreaming.add(nodeId)
     set({ streamingNodeIds: nextStreaming, error: null })
@@ -226,29 +299,35 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       if (!state.session) return state
       const node = state.session.nodes[nodeId]
       if (!node) return state
-      return {
-        session: {
-          ...state.session,
-          nodes: {
-            ...state.session.nodes,
-            [nodeId]: {
-              ...node,
-              phase: '2',
-              node_state: 'expanded',
-            },
+      const nextSession = persistSession({
+        ...state.session,
+        nodes: {
+          ...state.session.nodes,
+          [nodeId]: {
+            ...node,
+            phase: '2',
+            node_state: 'expanded',
           },
         },
+      })
+      return {
+        session: nextSession,
       }
     })
 
+    const prefetchStartIds: string[] = []
     try {
-      for await (const event of streamSSE(`/api/session/${sessionId}/node/${nodeId}/expand`, {})) {
+      for await (const event of streamSSE(`/api/session/${sessionId}/node/${nodeId}/expand`, {
+        session: stripChatHistory(requestSession),
+      })) {
         if (event.event === 'node_updated') {
           get()._applyNodeUpdated(event.data as ExpandPatch)
           continue
         }
         if (event.event === 'node_added') {
-          get()._applyNodeAdded(event.data as GraphNode)
+          const node = event.data as GraphNode
+          get()._applyNodeAdded(node)
+          prefetchStartIds.push(node.id)
           continue
         }
         if (event.event === 'edge_added') {
@@ -266,6 +345,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const current = new Set(get().streamingNodeIds)
       current.delete(nodeId)
       set({ streamingNodeIds: current })
+      if (prefetchStartIds.length) {
+        void get()._prefetchPhase2(prefetchStartIds)
+      }
     }
   },
 
@@ -295,30 +377,31 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   async explainNode(nodeId) {
-    const { sessionId } = get()
-    if (!sessionId) return
+    const { sessionId, session } = get()
+    if (!sessionId || !session) return
 
     const nextExplaining = new Set(get().explainingNodeIds)
     nextExplaining.add(nodeId)
     set({ explainingNodeIds: nextExplaining, error: null })
 
     try {
-      const response = await api.explainNode(sessionId, nodeId)
+      const response = await api.explainNode(sessionId, nodeId, session)
       set((state) => {
         if (!state.session) return state
         const node = state.session.nodes[nodeId]
         if (!node) return state
-        return {
-          session: {
-            ...state.session,
-            nodes: {
-              ...state.session.nodes,
-              [nodeId]: {
-                ...node,
-                explain_more_text: response.explain_more_text,
-              },
+        const nextSession = persistSession({
+          ...state.session,
+          nodes: {
+            ...state.session.nodes,
+            [nodeId]: {
+              ...node,
+              explain_more_text: response.explain_more_text,
             },
           },
+        })
+        return {
+          session: nextSession,
         }
       })
     } catch (error) {
@@ -331,8 +414,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   async markLearned(nodeId) {
-    const { sessionId, session } = get()
-    if (!sessionId || !session) return
+    const { session } = get()
+    if (!session) return
 
     const node = session.nodes[nodeId]
     if (!node) return
@@ -359,20 +442,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         }),
       ) as Record<string, GraphNode>
 
-      return { session: { ...state.session, known_topics: known, nodes } }
+      return { session: persistSession({ ...state.session, known_topics: known, nodes }) }
     })
-
-    try {
-      const updated = await api.updateNodeState(sessionId, nodeId, 'learned')
-      set({ session: updated })
-    } catch (error) {
-      set({ error: error instanceof Error ? error.message : 'Failed to mark learned.' })
-    }
   },
 
   async deleteNode(nodeId) {
-    const { sessionId, session } = get()
-    if (!sessionId || !session || get().deletingNodeIds.has(nodeId)) return
+    const { session } = get()
+    if (!session || get().deletingNodeIds.has(nodeId)) return
     if (!session.nodes[nodeId]) return
 
     const locallyRemoved = collectSubtree(session, nodeId)
@@ -381,57 +457,44 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     nextDeleting.add(nodeId)
     set({ deletingNodeIds: nextDeleting, error: null })
 
-    const applyRemoval = (removed: Set<string>) => {
-      set((state) => {
-        if (!state.session) return state
+    set((state) => {
+      if (!state.session) return state
 
-        const streamingNodeIds = new Set(
-          [...state.streamingNodeIds].filter((id) => !removed.has(id)),
-        )
-        const explainingNodeIds = new Set(
-          [...state.explainingNodeIds].filter((id) => !removed.has(id)),
-        )
+      const streamingNodeIds = new Set(
+        [...state.streamingNodeIds].filter((id) => !locallyRemoved.has(id)),
+      )
+      const explainingNodeIds = new Set(
+        [...state.explainingNodeIds].filter((id) => !locallyRemoved.has(id)),
+      )
 
-        return {
-          session: removeNodesFromSession(state.session, removed),
-          streamingNodeIds,
-          explainingNodeIds,
-          chatOpenNodeId:
-            state.chatOpenNodeId && removed.has(state.chatOpenNodeId)
-              ? null
-              : state.chatOpenNodeId,
-          selectedPhase2NodeId:
-            state.selectedPhase2NodeId && removed.has(state.selectedPhase2NodeId)
-              ? null
-              : state.selectedPhase2NodeId,
-        }
-      })
-    }
-
-    try {
-      const response = await api.deleteNode(sessionId, nodeId)
-      applyRemoval(new Set([...locallyRemoved, ...response.removed_node_ids]))
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        applyRemoval(locallyRemoved)
-      } else {
-        set({ error: error instanceof Error ? error.message : 'Failed to delete node.' })
+      return {
+        session: persistSession(removeNodesFromSession(state.session, locallyRemoved)),
+        streamingNodeIds,
+        explainingNodeIds,
+        chatOpenNodeId:
+          state.chatOpenNodeId && locallyRemoved.has(state.chatOpenNodeId)
+            ? null
+            : state.chatOpenNodeId,
+        selectedPhase2NodeId:
+          state.selectedPhase2NodeId && locallyRemoved.has(state.selectedPhase2NodeId)
+            ? null
+            : state.selectedPhase2NodeId,
       }
-    } finally {
-      const current = new Set(get().deletingNodeIds)
-      current.delete(nodeId)
-      set({ deletingNodeIds: current })
-    }
+    })
+
+    const current = new Set(get().deletingNodeIds)
+    current.delete(nodeId)
+    set({ deletingNodeIds: current })
   },
 
   async suggestPrerequisite(nodeId, message) {
-    const { sessionId } = get()
+    const { sessionId, session } = get()
     const trimmed = message.trim()
-    if (!sessionId || !trimmed) return
+    if (!sessionId || !session || !trimmed) return
 
     set({ error: null })
     try {
-      const { node, edge } = await api.suggestPrerequisite(sessionId, nodeId, trimmed)
+      const { node, edge } = await api.suggestPrerequisite(sessionId, nodeId, trimmed, session)
       get()._applyNodeAdded(node)
       get()._applyEdgeAdded(edge)
     } catch (error) {
@@ -440,7 +503,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   async restartFlow() {
-    await api.clearSessions()
     await clearBrowserData()
     set({
       sessionId: null,
@@ -465,6 +527,30 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({ chatOpenNodeId: null })
   },
 
+  appendChatExchange(nodeId, userMessage, assistantMessage) {
+    set((state) => {
+      if (!state.session) return state
+      const node = state.session.nodes[nodeId]
+      if (!node) return state
+      const nextHistory = [
+        ...node.chat_history,
+        { role: 'user' as const, content: userMessage, created_at: new Date().toISOString() },
+        { role: 'assistant' as const, content: assistantMessage, created_at: new Date().toISOString() },
+      ].slice(-20)
+      const nextSession = persistSession({
+        ...state.session,
+        nodes: {
+          ...state.session.nodes,
+          [nodeId]: {
+            ...node,
+            chat_history: nextHistory,
+          },
+        },
+      })
+      return { session: nextSession }
+    })
+  },
+
   openNodeDetails(nodeId) {
     set({ selectedPhase2NodeId: nodeId })
   },
@@ -478,24 +564,25 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       if (!state.session) return state
       const parentId = node.parent_id
       const parent = parentId ? state.session.nodes[parentId] : null
-      return {
-        session: {
-          ...state.session,
-          nodes: {
-            ...state.session.nodes,
-            [node.id]: node,
-            ...(parentId && parent
-              ? {
-                  [parentId]: {
-                    ...parent,
-                    child_ids: parent.child_ids.includes(node.id)
-                      ? parent.child_ids
-                      : [...parent.child_ids, node.id],
-                  },
-                }
-              : {}),
-          },
+      const nextSession = persistSession({
+        ...state.session,
+        nodes: {
+          ...state.session.nodes,
+          [node.id]: node,
+          ...(parentId && parent
+            ? {
+                [parentId]: {
+                  ...parent,
+                  child_ids: parent.child_ids.includes(node.id)
+                    ? parent.child_ids
+                    : [...parent.child_ids, node.id],
+                },
+              }
+            : {}),
         },
+      })
+      return {
+        session: nextSession,
       }
     })
   },
@@ -505,21 +592,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       if (!state.session || !patch.id) return state
       const node = state.session.nodes[patch.id]
       if (!node) return state
-      return {
-        session: {
-          ...state.session,
-          nodes: {
-            ...state.session.nodes,
-            [patch.id]: {
-              ...node,
-              phase: patch.phase ?? '2',
-              node_state: patch.node_state ?? node.node_state,
-              is_visible: patch.is_visible ?? node.is_visible,
-              sources: patch.sources ?? (patch.resource ? [patch.resource] : node.sources),
-              resource: patch.resource ?? node.resource,
-            },
+      const nextSession = persistSession({
+        ...state.session,
+        nodes: {
+          ...state.session.nodes,
+          [patch.id]: {
+            ...node,
+            phase: patch.phase ?? '2',
+            node_state: patch.node_state ?? node.node_state,
+            is_visible: patch.is_visible ?? node.is_visible,
+            sources: patch.sources ?? (patch.resource ? [patch.resource] : node.sources),
+            resource: patch.resource ?? node.resource,
           },
         },
+      })
+      return {
+        session: nextSession,
       }
     })
   },
@@ -528,12 +616,49 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set((state) => {
       if (!state.session) return state
       const exists = state.session.edges.some((current) => current.id === edge.id)
+      const nextSession = persistSession({
+        ...state.session,
+        edges: exists ? state.session.edges : [...state.session.edges, edge],
+      })
       return {
-        session: {
-          ...state.session,
-          edges: exists ? state.session.edges : [...state.session.edges, edge],
-        },
+        session: nextSession,
       }
     })
+  },
+
+  async _prefetchPhase2(startNodeIds) {
+    const { sessionId, session } = get()
+    if (!sessionId || !session || !startNodeIds.length) return
+
+    try {
+      const response = await api.prefetchPhase2(sessionId, session, startNodeIds)
+      if (!response || (!response.nodes.length && !response.edges.length)) return
+      set((state) => {
+        if (!state.session || state.session.id !== session.id) return state
+
+        const nodes = { ...state.session.nodes }
+        for (const node of response.nodes) {
+          nodes[node.id] = node
+          if (node.parent_id && nodes[node.parent_id]) {
+            const parent = nodes[node.parent_id]
+            nodes[node.parent_id] = {
+              ...parent,
+              child_ids: parent.child_ids.includes(node.id)
+                ? parent.child_ids
+                : [...parent.child_ids, node.id],
+            }
+          }
+        }
+
+        const existingEdges = new Set(state.session.edges.map((edge) => edge.id))
+        const edges = [
+          ...state.session.edges,
+          ...response.edges.filter((edge) => !existingEdges.has(edge.id)),
+        ]
+        return { session: persistSession({ ...state.session, nodes, edges }) }
+      })
+    } catch {
+      return
+    }
   },
 }))

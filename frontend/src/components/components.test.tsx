@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../lib/api'
 import * as browserData from '../lib/browserData'
 import { OPENAI_API_KEY_STORAGE_KEY } from '../lib/openAiApiKey'
+import { saveLocalSession } from '../lib/sessionPersistence'
 import { streamSSE } from '../hooks/useSSE'
 import { GraphCanvas } from './GraphCanvas'
 import { GrayedNode } from './GrayedNode'
@@ -148,11 +149,12 @@ describe('frontend components', () => {
 
   it('StartScreen creates a new session and resumes previous sessions', async () => {
     const user = userEvent.setup()
-    mockedApi.listSessions.mockResolvedValue([
-      { id: 'old-session', root_topic: 'Distributed Systems', created_at: '2026-01-01T00:00:00Z', phase: '2' },
-    ])
+    saveLocalSession(makePhase2Session({
+      id: 'old-session',
+      root_topic: 'Distributed Systems',
+      created_at: '2026-01-01T00:00:00Z',
+    }))
     mockedApi.createSession.mockResolvedValue({ session_id: 'new-session', session: makeSession() })
-    mockedApi.getSession.mockResolvedValue(makePhase2Session())
 
     render(<StartScreen />)
 
@@ -176,13 +178,11 @@ describe('frontend components', () => {
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBe('new-session')
 
     await user.click(screen.getByRole('button', { name: /Distributed Systems/i }))
-    expect(mockedApi.getSession).toHaveBeenCalledWith('old-session')
+    expect(useSessionStore.getState().sessionId).toBe('old-session')
   })
 
   it('StartScreen exposes a clear cache action', async () => {
     const user = userEvent.setup()
-    mockedApi.listSessions.mockResolvedValue([])
-    mockedApi.clearSessions.mockResolvedValue({ deleted_count: 1 })
     setStoreSession(makeSession())
     localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
     localStorage.setItem(OPENAI_API_KEY_STORAGE_KEY, 'sk-user-key')
@@ -227,7 +227,13 @@ describe('frontend components', () => {
       depth: 2,
     })
     setStoreSession(session)
-    mockedApi.expandPhase1Topic.mockResolvedValue(makeSession())
+    const generated = makeNode({
+      id: 'optimization-grandchild',
+      label: 'Gradient Descent',
+      parent_id: 'child-b',
+      depth: 2,
+    })
+    mockedApi.generatePhase1Children.mockResolvedValue({ children: [generated] })
 
     render(<Phase1View />)
 
@@ -237,7 +243,10 @@ describe('frontend components', () => {
     vi.clearAllMocks()
     await user.click(screen.getByRole('button', { name: /Optimization/i }))
     await user.click(screen.getByRole('button', { name: 'Expand' }))
-    expect(mockedApi.expandPhase1Topic).toHaveBeenCalledWith('session-1', 'child-b')
+    expect(mockedApi.generatePhase1Children).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'session-1' }),
+      'child-b',
+    )
   })
 
   it('Phase1View back button returns to the home screen without clearing cache', async () => {
@@ -249,7 +258,6 @@ describe('frontend components', () => {
 
     await user.click(screen.getByRole('button', { name: 'Back' }))
 
-    expect(mockedApi.clearSessions).not.toHaveBeenCalled()
     expect(mockedClearBrowserData).not.toHaveBeenCalled()
     expect(useSessionStore.getState().activeView).toBe('home')
     expect(useSessionStore.getState().session).toBeNull()
@@ -259,28 +267,15 @@ describe('frontend components', () => {
   it('DeepDiveButton starts the roadmap from the selected node', async () => {
     const user = userEvent.setup()
     setStoreSession(makeSession())
-    mockedApi.deepDive.mockResolvedValue({
-      session: makePhase2Session({
-        focus_node_id: 'root',
-        nodes: {
-          root: makeNode({
-            id: 'root',
-            label: 'Machine Learning',
-            phase: '2',
-            node_state: 'expanded',
-          }),
-        },
-        edges: [],
-      }),
-    })
     mockedStreamSSE.mockImplementation(async function* () {})
 
     render(<Phase1View />)
 
     await user.click(screen.getByRole('button', { name: 'Machine Learning' }))
     await user.click(screen.getByRole('button', { name: 'Deep Dive' }))
-    expect(mockedApi.deepDive).toHaveBeenCalledWith('session-1', 'root')
-    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/root/expand', {})
+    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/root/expand', {
+      session: expect.objectContaining({ id: 'session-1' }),
+    })
     expect(useSessionStore.getState().session?.phase).toBe('2')
   })
 
@@ -333,17 +328,18 @@ describe('frontend components', () => {
     const session = makePhase2Session()
     setStoreSession(session)
     mockedStreamSSE.mockImplementation(async function* () {})
-    mockedApi.deleteNode.mockResolvedValue({ removed_node_ids: ['prereq'] })
 
     render(
       <GrayedNode data={{ node: session.nodes.prereq }} {...nodeProps('prereq')} />,
     )
 
     await user.click(screen.getByRole('button', { name: 'Activate Vector Spaces' }))
-    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/prereq/expand', {})
+    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/prereq/expand', {
+      session: expect.objectContaining({ id: 'session-1' }),
+    })
 
     await user.click(screen.getByRole('button', { name: 'Remove Vector Spaces' }))
-    expect(mockedApi.deleteNode).toHaveBeenCalledWith('session-1', 'prereq')
+    expect(useSessionStore.getState().session?.nodes.prereq).toBeUndefined()
 
     render(
       <GrayedNode
@@ -358,7 +354,6 @@ describe('frontend components', () => {
     const session = makePhase2Session()
     setStoreSession(session)
     mockedStreamSSE.mockImplementation(async function* () {})
-    mockedApi.deleteNode.mockResolvedValue({ removed_node_ids: ['prereq'] })
 
     render(
       <GrayedNode data={{ node: session.nodes.prereq }} {...nodeProps('prereq')} />,
@@ -367,7 +362,9 @@ describe('frontend components', () => {
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Activate Vector Spaces' }), {
       button: 0,
     })
-    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/prereq/expand', {})
+    expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/prereq/expand', {
+      session: expect.objectContaining({ id: 'session-1' }),
+    })
 
     mockedStreamSSE.mockClear()
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Remove Vector Spaces' }), {
@@ -408,7 +405,6 @@ describe('frontend components', () => {
     session.edges.push({ id: 'edge-hidden', from: 'prereq', to: 'hidden', label: 'requires' })
     setStoreSession(session)
     localStorage.setItem(SESSION_STORAGE_KEY, 'session-1')
-    mockedApi.clearSessions.mockResolvedValue({ deleted_count: 1 })
 
     render(<GraphCanvas />)
 
@@ -517,12 +513,11 @@ describe('frontend components', () => {
     )
   })
 
-  it('NodeChatPanel streams a scoped answer and reloads persisted history', async () => {
+  it('NodeChatPanel streams a scoped answer and stores history locally', async () => {
     const user = userEvent.setup()
     const session = makePhase2Session()
     setStoreSession(session)
     useSessionStore.setState({ chatOpenNodeId: 'goal' })
-    mockedApi.getSession.mockResolvedValue(session)
     mockedStreamSSE.mockImplementation(async function* () {
       yield { event: 'token', data: { text: 'Hello ' } }
       yield { event: 'token', data: { text: 'there' } }
@@ -537,8 +532,13 @@ describe('frontend components', () => {
     expect(await screen.findByText('Hello there')).toBeInTheDocument()
     expect(mockedStreamSSE).toHaveBeenCalledWith('/api/session/session-1/node/goal/chat', {
       message: 'What is this?',
+      session: expect.objectContaining({ id: 'session-1' }),
+      history: [],
     })
-    await waitFor(() => expect(mockedApi.getSession).toHaveBeenCalledWith('session-1'))
+    await waitFor(() => {
+      const history = useSessionStore.getState().session?.nodes.goal.chat_history
+      expect(history?.map((message) => message.content)).toEqual(['What is this?', 'Hello there'])
+    })
 
     await user.click(within(screen.getByRole('banner')).getByRole('button'))
     expect(useSessionStore.getState().chatOpenNodeId).toBeNull()

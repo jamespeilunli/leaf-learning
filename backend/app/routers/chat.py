@@ -10,14 +10,15 @@ from pydantic import BaseModel, Field
 from app.ai import chat_with_node
 from app.models import ChatMessage, GraphNode, Session
 from app.openai_key import request_openai_api_key, require_openai_api_key
-from app.storage import load_session, save_session
 
 
 router = APIRouter()
 
 
 class ChatRequest(BaseModel):
+    session: Session
     message: str = Field(..., min_length=1, max_length=8000)
+    history: list[ChatMessage] = Field(default_factory=list)
 
 
 def _sse(event: str, data: object) -> str:
@@ -49,8 +50,9 @@ async def chat(
     payload: ChatRequest,
     openai_api_key: str | None = Depends(request_openai_api_key),
 ) -> StreamingResponse:
+    del session_id
     openai_api_key = require_openai_api_key(openai_api_key)
-    session = load_session(session_id)
+    session = payload.session.model_copy(deep=True)
     node = _get_node(session, node_id)
     if node.node_state not in {"expanded", "learned"}:
         raise HTTPException(status_code=400, detail="Node chat is only available for expanded nodes.")
@@ -59,31 +61,21 @@ async def chat(
     resource_description = node.sources[0].description if node.sources else node.resource.description if node.resource else ""
 
     async def event_stream() -> Iterable[str]:
-        full_response = ""
         try:
             async for chunk in chat_with_node(
                 node.label,
                 node_description,
                 resource_description,
                 goal_path,
-                node.chat_history[-20:],
+                payload.history[-20:],
                 payload.message,
                 openai_api_key=openai_api_key,
             ):
-                full_response += chunk
                 yield _sse("token", {"text": chunk})
         except Exception as exc:
             yield _sse("stream_error", {"message": str(exc)})
             return
 
-        node.chat_history.extend(
-            [
-                ChatMessage(role="user", content=payload.message),
-                ChatMessage(role="assistant", content=full_response),
-            ]
-        )
-        node.chat_history = node.chat_history[-20:]
-        save_session(session)
         yield _sse("stream_done", {})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
