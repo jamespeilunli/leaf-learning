@@ -30,6 +30,7 @@ def configure_logging() -> None:
 configure_logging()
 
 from app.routers import chat, graph, session
+from app.cors import get_cors_origins
 from app.storage import ensure_sessions_dir
 
 ensure_sessions_dir()
@@ -38,11 +39,7 @@ app = FastAPI(title="Learning Roadmap API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "https://alphag3n-hackathon-2026-u87w.onrender.com/",
-    ],
+    allow_origins=get_cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
