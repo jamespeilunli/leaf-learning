@@ -196,6 +196,23 @@ describe('frontend components', () => {
     expect(localStorage.getItem(OPENAI_API_KEY_STORAGE_KEY)).toBeNull()
   })
 
+  it('StartScreen does not expose the OpenAI API key input as a password field', () => {
+    render(<StartScreen />)
+
+    const apiKeyInput = screen.getByLabelText('OpenAI API key')
+
+    expect(apiKeyInput).toHaveAttribute('type', 'text')
+    expect(apiKeyInput).toHaveAttribute('autocomplete', 'off')
+    expect(apiKeyInput).toHaveAttribute('autocapitalize', 'none')
+    expect(apiKeyInput).toHaveAttribute('autocorrect', 'off')
+    expect(apiKeyInput).toHaveAttribute('spellcheck', 'false')
+    expect(apiKeyInput).toHaveAttribute('data-1p-ignore', 'true')
+    expect(apiKeyInput).toHaveAttribute('data-bwignore', 'true')
+    expect(apiKeyInput).toHaveAttribute('data-lpignore', 'true')
+    expect(apiKeyInput).toHaveAttribute('data-form-type', 'other')
+    expect(apiKeyInput).toHaveClass('[-webkit-text-security:disc]')
+  })
+
   it('Phase1OptionCard displays subtopic context and selects the node', async () => {
     const user = userEvent.setup()
     const onSelect = vi.fn()

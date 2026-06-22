@@ -145,10 +145,17 @@ export function StartScreen() {
                   </label>
                   <TextInput
                     id="openai-api-key"
+                    autoCapitalize="none"
                     autoComplete="off"
-                    className="mt-2 border-white/80 bg-white/90"
+                    autoCorrect="off"
+                    className="mt-2 border-white/80 bg-white/90 [-webkit-text-security:disc]"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    data-lpignore="true"
                     placeholder="sk-..."
-                    type="password"
+                    spellCheck={false}
+                    type="text"
                     value={apiKey}
                     onChange={(event) => {
                       setApiKey(event.target.value)
