@@ -24,11 +24,6 @@ def deep_dive_locally(session: dict, node_id: str) -> dict:
                 "phase": "2",
                 "node_state": "expanded",
                 "is_visible": True,
-                "child_ids": [
-                    child_id
-                    for child_id in node["child_ids"]
-                    if session["nodes"][child_id]["phase"] == "2"
-                ],
             },
         },
     }
@@ -105,6 +100,32 @@ class ApiFlowTests(unittest.TestCase):
         self.assertIn("edge_added", event_names)
         self.assertTrue(any("mode=on-demand" in message for message in logs.output))
         self.assertEqual(list(self.sessions_dir.glob("*.json")), [])
+
+    def test_phase2_expand_ignores_existing_phase1_children_on_focus_node(self) -> None:
+        session_id, session = self.create_machine_learning_session()
+        root_id = session["current_phase1_node_id"]
+        child_id = session["nodes"][root_id]["child_ids"][0]
+        phase1_grandchild = GraphNode(
+            label="Phase 1 grandchild",
+            phase="1",
+            parent_id=child_id,
+            depth=session["nodes"][child_id]["depth"] + 1,
+        ).model_dump(by_alias=True)
+        session["nodes"][phase1_grandchild["id"]] = phase1_grandchild
+        session["nodes"][child_id]["child_ids"].append(phase1_grandchild["id"])
+        session = deep_dive_locally(session, child_id)
+
+        response = self.client.post(
+            f"/api/session/{session_id}/node/{child_id}/expand",
+            json={"session": session},
+        )
+
+        events = parse_sse(response.text)
+        added_nodes = [data for name, data in events if name == "node_added"]
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(len(added_nodes), 0)
+        self.assertTrue(all(node["phase"] == "2" for node in added_nodes))
+        self.assertNotIn(phase1_grandchild["id"], [node["id"] for node in added_nodes])
 
     def test_phase2_expand_accepts_stale_optimistic_expanded_snapshot(self) -> None:
         session_id, session = self.create_machine_learning_session()

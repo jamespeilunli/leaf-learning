@@ -125,6 +125,45 @@ describe('useSessionStore', () => {
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
   })
 
+  it('keeps the selected phase 1 node visible after deep dive and returning to phase 1', async () => {
+    const session = makeSession({
+      nodes: {
+        ...makeSession().nodes,
+        'child-a': makeNode({
+          id: 'child-a',
+          label: 'Representation Learning',
+          description: 'Learned features and latent spaces.',
+          parent_id: 'root',
+          depth: 1,
+          child_ids: ['grandchild'],
+        }),
+        grandchild: makeNode({
+          id: 'grandchild',
+          label: 'Embeddings',
+          parent_id: 'child-a',
+          depth: 2,
+        }),
+      },
+    })
+    useSessionStore.setState({ sessionId: 'session-1', session, activeView: 'phase1' })
+    mockedStreamSSE.mockImplementation(async function* () {
+      yield { event: 'node_updated', data: { id: 'child-a', phase: '2', node_state: 'expanded' } }
+      yield { event: 'stream_done', data: {} }
+    })
+
+    await getState().deepDive('child-a')
+    await getState().expandNode('child-a')
+    getState().showPhase1()
+
+    const updated = getState().session as Session
+    expect(updated.phase).toBe('2')
+    expect(updated.focus_node_id).toBe('child-a')
+    expect(updated.nodes['child-a'].phase).toBe('1')
+    expect(updated.nodes['child-a'].child_ids).toContain('grandchild')
+    expect(updated.nodes.root.child_ids).toContain('child-a')
+    expect(getState().activeView).toBe('phase1')
+  })
+
   it('applies streamed phase 2 node updates, child additions, and edges', async () => {
     const session = makePhase2Session({
       nodes: {

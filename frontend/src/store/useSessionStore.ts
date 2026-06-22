@@ -268,12 +268,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           ...session.nodes,
           [nodeId]: {
             ...node,
-            phase: '2',
             node_state: 'expanded',
             is_visible: true,
-            child_ids: node.child_ids.filter(
-              (childId) => session.nodes[childId]?.phase === '2',
-            ),
           },
         },
       })
@@ -305,7 +301,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           ...state.session.nodes,
           [nodeId]: {
             ...node,
-            phase: '2',
             node_state: 'expanded',
           },
         },
@@ -352,11 +347,39 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   showPhase1() {
-    set({
-      activeView: 'phase1',
-      selectedPhase2NodeId: null,
-      chatOpenNodeId: null,
-      error: null,
+    set((state) => {
+      if (!state.session) {
+        return {
+          activeView: 'phase1',
+          selectedPhase2NodeId: null,
+          chatOpenNodeId: null,
+          error: null,
+        }
+      }
+
+      const focusNodeId = state.session.focus_node_id
+      const focusNode = focusNodeId ? state.session.nodes[focusNodeId] : null
+      const session =
+        focusNode && focusNode.parent_id && focusNode.phase !== '1'
+          ? persistSession({
+              ...state.session,
+              nodes: {
+                ...state.session.nodes,
+                [focusNode.id]: {
+                  ...focusNode,
+                  phase: '1',
+                },
+              },
+            })
+          : state.session
+
+      return {
+        session,
+        activeView: 'phase1',
+        selectedPhase2NodeId: null,
+        chatOpenNodeId: null,
+        error: null,
+      }
     })
   },
 
@@ -598,7 +621,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           ...state.session.nodes,
           [patch.id]: {
             ...node,
-            phase: patch.phase ?? '2',
+            phase:
+              patch.id === state.session.focus_node_id && node.phase === '1'
+                ? '1'
+                : patch.phase ?? node.phase,
             node_state: patch.node_state ?? node.node_state,
             is_visible: patch.is_visible ?? node.is_visible,
             sources: patch.sources ?? (patch.resource ? [patch.resource] : node.sources),

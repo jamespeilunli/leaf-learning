@@ -249,6 +249,28 @@ describe('frontend components', () => {
     )
   })
 
+  it('Phase1View does not treat Phase 2 children as Phase 1 expansion', async () => {
+    const user = userEvent.setup()
+    const session = makeSession()
+    const phase2Child = makeNode({
+      id: 'phase2-prereq',
+      label: 'Phase 2 prerequisite',
+      phase: '2',
+      node_state: 'grayed',
+      parent_id: 'child-a',
+      depth: 2,
+    })
+    session.nodes['child-a'].child_ids = [phase2Child.id]
+    session.nodes[phase2Child.id] = phase2Child
+    setStoreSession(session)
+    mockedApi.generatePhase1Children.mockResolvedValue({ children: [] })
+
+    render(<Phase1View />)
+
+    await user.click(screen.getByRole('button', { name: /Representation Learning/i }))
+    expect(screen.getByRole('button', { name: 'Expand' })).toBeEnabled()
+  })
+
   it('Phase1View back button returns to the home screen without clearing cache', async () => {
     const user = userEvent.setup()
     setStoreSession(makeSession())

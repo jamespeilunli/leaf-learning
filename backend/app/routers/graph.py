@@ -85,11 +85,21 @@ async def expand_node(
 
     async def event_stream() -> Iterable[str]:
         children_allowed = can_add_phase2_children(node)
+        phase2_child_ids = [
+            child_id
+            for child_id in node.child_ids
+            if session.nodes.get(child_id) and session.nodes[child_id].phase == "2"
+        ]
 
-        if children_allowed and not node.child_ids and adopt_prefetched_children_by_label(session, node):
+        if children_allowed and not phase2_child_ids and adopt_prefetched_children_by_label(session, node):
+            phase2_child_ids = [
+                child_id
+                for child_id in node.child_ids
+                if session.nodes.get(child_id) and session.nodes[child_id].phase == "2"
+            ]
             yield _sse("node_updated", node.model_dump(by_alias=True))
 
-        if children_allowed and node.child_ids:
+        if children_allowed and phase2_child_ids:
             revealed_nodes, revealed_edges = reveal_direct_phase2_children(session, node)
             yield _sse("node_updated", node.model_dump(by_alias=True))
             for child in revealed_nodes:

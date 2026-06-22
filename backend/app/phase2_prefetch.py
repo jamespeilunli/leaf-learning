@@ -290,12 +290,13 @@ def reveal_direct_phase2_children(session: Session, node: GraphNode) -> tuple[li
 
     revealed_nodes: list[GraphNode] = []
     revealed_edges: list[GraphEdge] = []
-    child_ids = set(node.child_ids)
+    child_ids: set[str] = set()
 
     for child_id in node.child_ids:
         child = session.nodes.get(child_id)
-        if not child:
+        if not child or child.phase != "2":
             continue
+        child_ids.add(child.id)
         child.is_visible = True
         revealed_nodes.append(child)
 

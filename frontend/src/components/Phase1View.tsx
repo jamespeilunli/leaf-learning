@@ -48,10 +48,18 @@ const ROOT_NODE_HEIGHT = 82
 const TOPIC_NODE_WIDTH = 168
 const TOPIC_NODE_HEIGHT = 72
 
-function getNodeColor(node: GraphNode, selectedNodeId: string | null) {
+function hasPhase1Children(node: GraphNode, nodesById: Record<string, GraphNode>) {
+  return node.child_ids.some((childId) => nodesById[childId]?.phase === '1')
+}
+
+function getNodeColor(
+  node: GraphNode,
+  selectedNodeId: string | null,
+  nodesById: Record<string, GraphNode>,
+) {
   if (node.id === selectedNodeId) return SELECTED_COLOR
   if (!node.parent_id) return ROOT_COLOR
-  if (node.child_ids.length) return EXPANDED_COLOR
+  if (hasPhase1Children(node, nodesById)) return EXPANDED_COLOR
   return READY_COLOR
 }
 
@@ -228,8 +236,8 @@ export function Phase1View() {
       const seededAngle = (node.depth + cache.size + 1) * 1.73
       const topicNode: TopicNode = cached ?? {
         ...node,
-        color: getNodeColor(node, selectedNodeId),
-        isExpanded: node.child_ids.length > 0,
+        color: getNodeColor(node, selectedNodeId, session?.nodes ?? {}),
+        isExpanded: hasPhase1Children(node, session?.nodes ?? {}),
         isNew: newNodeIds.has(node.id),
         isRoot: node.parent_id === null,
         val: node.parent_id ? 10 : 14,
@@ -241,8 +249,8 @@ export function Phase1View() {
 
       Object.assign(topicNode, {
         ...node,
-        color: getNodeColor(node, selectedNodeId),
-        isExpanded: node.child_ids.length > 0,
+        color: getNodeColor(node, selectedNodeId, session?.nodes ?? {}),
+        isExpanded: hasPhase1Children(node, session?.nodes ?? {}),
         isNew: newNodeIds.has(node.id),
         isRoot: node.parent_id === null,
         val: node.parent_id ? 10 : 14,
@@ -260,10 +268,10 @@ export function Phase1View() {
     )
 
     setGraphData({ links, nodes })
-  }, [newNodeIds, phase1Nodes, selectedNodeId])
+  }, [newNodeIds, phase1Nodes, selectedNodeId, session?.nodes])
 
   const selectedNode = selectedNodeId && session ? session.nodes[selectedNodeId] : null
-  const hasExpanded = Boolean(selectedNode?.child_ids.length)
+  const hasExpanded = Boolean(selectedNode && session && hasPhase1Children(selectedNode, session.nodes))
 
   useEffect(() => {
     const graph = graphRef.current
